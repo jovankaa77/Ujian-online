@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write access to artifacts collection
+    match /artifacts/{artifactId}/public/data/{document=**} {
+      allow read, write: if true;
+    }
+    
+    // Teachers collection
+    match /artifacts/{artifactId}/public/data/teachers/{teacherId} {
+      allow read, write: if true;
+    }
+    
+    // Students collection  
+    match /artifacts/{artifactId}/public/data/students/{studentId} {
+      allow read, write: if true;
+    }
+    
+    // Exams collection
+    match /artifacts/{artifactId}/public/data/exams/{examId} {
+      allow read, write: if true;
+      
+      // Questions subcollection
+      match /questions/{questionId} {
+        allow read, write: if true;
+      }
+      
+      // Sessions subcollection - CRITICAL for collection group queries
+      match /sessions/{sessionId} {
+        allow read, write: if true;
+      }
+      
+      // Applications subcollection
+      match /applications/{applicationId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // IMPORTANT: Collection group rule for sessions
+    // This allows collection group queries across all sessions
+    match /{path=**}/sessions/{sessionId} {
+      allow read, write: if true;
+    }
+  }
+}
