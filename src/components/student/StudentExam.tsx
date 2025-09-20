@@ -4,7 +4,6 @@ import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 import { MicVAD, utils } from '@ricky0123/vad-web';
-import * as ort from 'onnxruntime-web';
 
 interface Question {
   id: string;
@@ -107,16 +106,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           onVADMisfire: () => {
             console.log("🔊 VAD misfire (false positive)");
           },
-          workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
-          modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
-          ortConfig: () => ({
-            executionProviders: ['wasm'],
-            env: {
-              wasm: {
-                wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/'
-              }
-            }
-          })
+          workletURL: '/vad.worklet.bundle.min.js',
+          modelURL: '/silero_vad.onnx',
+          ortConfig: {
+            executionProviders: ['wasm']
+          }
         });
         
         setVadInstance(vad);
@@ -364,16 +358,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         onVADMisfire: () => {
           console.log("🔊 VAD misfire (false positive)");
         },
-        workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
-        modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
-        ortConfig: () => ({
-          executionProviders: ['wasm'],
-          env: {
-            wasm: {
-              wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/'
-            }
-          }
-        })
+        workletURL: '/vad.worklet.bundle.min.js',
+        modelURL: '/silero_vad.onnx',
+        ortConfig: {
+          executionProviders: ['wasm']
+        }
       });
       
       setVadInstance(vad);
