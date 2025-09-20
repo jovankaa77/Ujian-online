@@ -251,8 +251,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   }, []);
 
   const startAudioRecording = (stream: MediaStream) => {
-    if (isRecordingAudio || !stream) {
-      console.log("⚠️ Already recording or no stream available");
+    if (isRecordingAudio || !stream || audioRecordingCount >= 25) {
+      console.log("⚠️ Already recording, no stream available, or max recordings reached (25)");
       return;
     }
     

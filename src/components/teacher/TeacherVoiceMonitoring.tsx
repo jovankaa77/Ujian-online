@@ -419,61 +419,138 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
           </button>
         </div>
       ) : (
-        <div className="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-gray-700">
-                <tr>
-                  <th className="p-4">Waktu</th>
-                  <th className="p-4">Nama Siswa</th>
-                  <th className="p-4">NIM</th>
-                  <th className="p-4">Kelas</th>
-                  <th className="p-4">Jurusan</th>
-                  <th className="p-4">Durasi</th>
-                  <th className="p-4">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRecordings.map((item, index) => (
-                  <tr key={`${item.id}-${item.recordingKey}`} className="border-b border-gray-700 hover:bg-gray-700/50">
-                    <td className="p-4 text-sm">
-                      <div className="font-mono text-blue-400">
-                        {new Date(item.recording.timestamp).toLocaleTimeString('id-ID')}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Group recordings by student */}
+          {(() => {
+            // Group recordings by student
+            const studentGroups = new Map();
+            
+            filteredRecordings.forEach(item => {
+              const studentKey = `${item.studentInfo.name}_${item.studentInfo.nim}`;
+              if (!studentGroups.has(studentKey)) {
+                studentGroups.set(studentKey, {
+                  studentInfo: item.studentInfo,
+                  recordings: []
+                });
+              }
+              studentGroups.get(studentKey).recordings.push(item);
+            });
+            
+            // Convert to array and sort by latest recording
+            const sortedGroups = Array.from(studentGroups.values()).sort((a, b) => {
+              const latestA = Math.max(...a.recordings.map(r => new Date(r.recording.timestamp).getTime()));
+              const latestB = Math.max(...b.recordings.map(r => new Date(r.recording.timestamp).getTime()));
+              return latestB - latestA;
+            });
+            
+            return sortedGroups.map((group, groupIndex) => (
+              <div 
+                key={`${group.studentInfo.name}_${group.studentInfo.nim}`}
+                className="bg-gray-800 rounded-lg shadow-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors"
+              >
+                {/* Student Info Header */}
+                <div className="p-4 bg-gray-700 border-b border-gray-600">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center">
+                        <span className="text-lg font-bold text-white">
+                          {group.studentInfo.name.charAt(0).toUpperCase()}
+                        </span>
                       </div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(item.recording.timestamp).toLocaleDateString('id-ID')}
+                      <div>
+                        <h4 className="font-bold text-lg text-white">{group.studentInfo.name}</h4>
+                        <p className="text-sm text-gray-300">NIM: {group.studentInfo.nim}</p>
                       </div>
-                    </td>
-                    <td className="p-4 font-semibold">{item.studentInfo.name}</td>
-                    <td className="p-4 text-gray-300">{item.studentInfo.nim}</td>
-                    <td className="p-4 text-gray-300">{item.studentInfo.className || 'N/A'}</td>
-                    <td className="p-4 text-gray-300">{item.studentInfo.major || 'N/A'}</td>
-                    <td className="p-4">
-                      <span className="px-2 py-1 bg-purple-600 text-white text-xs rounded-full">
-                        {item.recording.duration}s
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => playAudio(item.recording, item.studentInfo)}
-                          className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2 px-3 rounded flex items-center"
+                    </div>
+                    <div className="text-right">
+                      <div className="px-3 py-1 bg-purple-600 text-white text-sm font-bold rounded-full">
+                        🎤 {group.recordings.length} Rekaman
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                    <div><span className="font-bold">Kelas:</span> {group.studentInfo.className || 'N/A'}</div>
+                    <div><span className="font-bold">Jurusan:</span> {group.studentInfo.major || 'N/A'}</div>
+                  </div>
+                </div>
+                
+                {/* Voice Recordings List */}
+                <div className="p-4">
+                  <h5 className="text-sm font-bold text-gray-300 mb-3 flex items-center">
+                    🎵 Daftar Rekaman Suara:
+                    <span className="ml-2 px-2 py-1 bg-purple-600 text-white text-xs rounded-full">
+                      {group.recordings.length}
+                    </span>
+                  </h5>
+                  
+                  {group.recordings.length === 0 ? (
+                    <div className="text-center py-6 text-gray-500">
+                      <div className="text-3xl mb-2">🎤</div>
+                      <p className="text-sm">Belum ada rekaman suara</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {group.recordings
+                        .sort((a, b) => new Date(b.recording.timestamp).getTime() - new Date(a.recording.timestamp).getTime())
+                        .map((item, index) => (
+                        <div 
+                          key={`${item.id}-${item.recordingKey}`}
+                          className="bg-gray-700 p-3 rounded-lg border border-gray-600 hover:border-purple-400 transition-colors"
                         >
-                          🔊 Putar ({item.recording.duration}s)
-                        </button>
-                        <button
-                          onClick={() => openRecordingModal(item.recording, item.studentInfo)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-3 rounded"
-                        >
-                          📋 Detail
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-grow">
+                              <div className="flex items-center space-x-2 mb-1">
+                                <span className="px-2 py-1 bg-purple-600 text-white text-xs rounded-full font-bold">
+                                  #{group.recordings.length - index}
+                                </span>
+                                <span className="text-xs text-gray-400 font-mono">
+                                  {new Date(item.recording.timestamp).toLocaleTimeString('id-ID')}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-400">
+                                📅 {new Date(item.recording.timestamp).toLocaleDateString('id-ID')}
+                              </div>
+                              <div className="text-xs text-purple-400 mt-1">
+                                ⏱️ Durasi: {item.recording.duration} detik
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => playAudio(item.recording, item.studentInfo)}
+                              className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2 px-3 rounded flex items-center justify-center"
+                            >
+                              🔊 Putar ({item.recording.duration}s)
+                            </button>
+                            <button
+                              onClick={() => openRecordingModal(item.recording, item.studentInfo)}
+                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-3 rounded flex items-center justify-center"
+                            >
+                              📋 Detail
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Summary Footer */}
+                <div className="p-3 bg-gray-700 border-t border-gray-600">
+                  <div className="flex justify-between items-center text-xs text-gray-400">
+                    <span>
+                      📊 Total: {group.recordings.length} rekaman
+                    </span>
+                    <span>
+                      ⏱️ Total durasi: {group.recordings.reduce((sum, r) => sum + r.recording.duration, 0)}s
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ));
+          })()}
         </div>
       )}
     </div>
