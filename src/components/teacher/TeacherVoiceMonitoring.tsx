@@ -4,11 +4,12 @@ import { db, appId } from '../../config/firebase';
 import Modal from '../ui/Modal';
 
 interface VoiceRecording {
-  audioData: string;
+  audioURL: string;
   timestamp: string;
   duration: number;
   studentId: string;
   studentName: string;
+  fileName?: string;
 }
 
 interface Session {
@@ -86,7 +87,7 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
               Object.keys(session).forEach(key => {
                 if (key.startsWith('voiceRecording_')) {
                   const recordingData = session[key];
-                  if (recordingData && recordingData.audioData) {
+                  if (recordingData && recordingData.audioURL) {
                     allRecordings.push({
                       id: session.id,
                       recording: recordingData,
@@ -173,7 +174,7 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
     }
     
     try {
-      const audio = new Audio(recording.audioData);
+      const audio = new Audio(recording.audioURL);
       audio.volume = 0.8;
       
       audio.onplay = () => {

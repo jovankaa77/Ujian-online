@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, getDocs, updateDoc, doc, query, limit } from 'firebase/firestore';
-import { db, appId } from '../../config/firebase';
+import { db, appId, storage } from '../../config/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 
@@ -277,31 +278,35 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           
           // Convert to base64
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-            const base64Audio = reader.result as string;
+          // Upload to Firebase Storage
+          try {
+            const timestamp = Date.now();
+            const fileName = `voice_recordings/${exam.id}/${sessionId}/${timestamp}.webm`;
+            const storageRef = ref(storage, fileName);
             
-            // Save to Firestore
+            // Upload the audio blob
+            const uploadResult = await uploadBytes(storageRef, audioBlob);
+            const downloadURL = await getDownloadURL(uploadResult.ref);
+            
+            // Save metadata to Firestore (only URL, not the actual audio data)
             const audioData = {
-              [`voiceRecording_${Date.now()}`]: {
-                audioData: base64Audio,
+              [`voiceRecording_${timestamp}`]: {
+                audioURL: downloadURL,
                 timestamp: new Date().toISOString(),
                 duration: 10,
                 studentId: user.id,
-                studentName: studentInfo.name
+                studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown',
+                fileName: fileName
               }
             };
             
-            try {
-              await updateDoc(sessionDocRef, audioData);
-              setAudioRecordingCount(prev => prev + 1);
-              console.log("✅ Audio recording saved to Firestore");
-            } catch (error) {
-              console.error("❌ Failed to save audio recording:", error);
-            }
-          };
-          
-          reader.readAsDataURL(audioBlob);
+            await updateDoc(sessionDocRef, audioData);
+            setAudioRecordingCount(prev => prev + 1);
+            console.log("✅ Audio recording uploaded to Storage and saved to Firestore");
+            
+          } catch (error) {
+            console.error("❌ Failed to save audio recording:", error);
+          }
         }
         
         setIsRecordingAudio(false);
