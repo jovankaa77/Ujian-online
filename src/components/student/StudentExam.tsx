@@ -198,9 +198,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           } finally {
             setIsProcessingAudio(false);
           }
-      };
-      
-      reader.readAsDataURL(audioBlob);
+        };
+        
+        reader.readAsDataURL(audioBlob);
+      }
       
     } catch (error) {
       console.error("❌ Error stopping recording:", error);
