@@ -112,30 +112,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                 startAudioRecording(stream);
               }
             }, 1000); // 1 second delay
-            
-            // Start recording after 1 second of continuous speech
-            speechDetectionTimeoutRef.current = setTimeout(() => {
-              if (speechStartTimeRef.current) {
-                console.log("🎤 1 second of speech detected, starting recording...");
-                startAudioRecording(stream);
-              }
-            }, 1000); // 1 second delay
           },
           onSpeechEnd: () => {
             console.log("🔇 Speech ended, stopping recording if active");
-            speechStartTimeRef.current = null;
-            
-            // Clear the detection timeout if speech ends before 1 second
-            if (speechDetectionTimeoutRef.current) {
-              clearTimeout(speechDetectionTimeoutRef.current);
-              speechDetectionTimeoutRef.current = null;
-            }
-            
-            // Stop recording if currently recording
-            if (isRecordingAudio && mediaRecorder && mediaRecorder.state === 'recording') {
-              console.log("🛑 Stopping recording due to speech end");
-              mediaRecorder.stop();
-            }
             speechStartTimeRef.current = null;
             
             // Clear the detection timeout if speech ends before 1 second
@@ -1347,7 +1326,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               <div className="flex justify-center space-x-4 text-sm">
                 <div className="text-red-500">Pelanggaran: {violations}/3</div>
                 <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
-                <div className="text-purple-400">🎤 Human Voice: {audioRecordingCount}</div>
+                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}</div>
               </div>
             </div>
           </div>
