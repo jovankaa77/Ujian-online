@@ -113,19 +113,37 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             // Start recording after 1 second of continuous speech
             speechDetectionTimeoutRef.current = setTimeout(() => {
               if (speechStartTimeRef.current) {
-                console.log("🎤 1 second of speech detected, starting recording...");
-                startAudioRecording(stream);
+                setSpeechDetected(true);
+                const now = Date.now();
+                setSpeechStartTime(now);
+                
+                // Clear any existing timeout
+                if (speechTimeoutRef.current) {
+                  clearTimeout(speechTimeoutRef.current);
+                }
+                
+                // Start recording after 1 second of continuous speech
+                speechTimeoutRef.current = setTimeout(() => {
+                  if (speechDetected && audioRecordingCount < 25) {
+                    console.log("🎤 Starting recording after 1 second of speech");
+                    startRecording();
+                  }
+                }, 1000);
               }
-            }, 1000); // 1 second delay
+            }, 1000);
           },
           onSpeechEnd: () => {
             console.log("🔇 Speech ended, stopping recording if active");
             speechStartTimeRef.current = null;
             
             // Clear the detection timeout if speech ends before 1 second
-            if (speechDetectionTimeoutRef.current) {
-              clearTimeout(speechDetectionTimeoutRef.current);
-              speechDetectionTimeoutRef.current = null;
+            setSpeechDetected(false);
+            setSpeechStartTime(null);
+            
+            // Cancel recording start if speech stops before 1 second
+            if (speechTimeoutRef.current) {
+              clearTimeout(speechTimeoutRef.current);
+              speechTimeoutRef.current = null;
             }
             
             // Stop recording if currently recording
@@ -444,7 +462,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             console.log("📷 Camera restarted successfully:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
             setIsCameraReady(true);
           } else {
-            studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown'
+            setTimeout(checkVideoReady, 100);
           }
         };
         
@@ -1329,12 +1347,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             <div className="text-center">
               <div className="text-3xl font-mono bg-gray-900 px-6 py-3 rounded-lg mb-2">
                 {Math.floor(timeLeft / 3600).toString().padStart(2, '0')}:
-              {speechDetected && !isRecording && (
-                <div className="text-xs text-yellow-400 mt-1">
-                  👂 Mendeteksi suara...
-                </div>
-              )}
-              {isRecording && (
+                {Math.floor((timeLeft % 3600) / 60).toString().padStart(2, '0')}:
                 {(timeLeft % 60).toString().padStart(2, '0')}
               </div>
               <div className="flex justify-center space-x-4 text-sm">
@@ -1390,11 +1403,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                       <span className="ml-2">{String.fromCharCode(65 + i)}. {opt}</span>
                     </label>
                   ))}
-                </div>
-              )}
-              {audioRecordingCount >= 25 && (
-                <div className="text-xs text-orange-400 mt-1">
-                  ⚠️ Batas maksimal tercapai
                 </div>
               )}
               
