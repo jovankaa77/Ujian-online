@@ -128,11 +128,17 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
 
     // Ensure studentInfo is properly defined
     const finalStudentInfo = studentInfo || {
-      fullName: user.fullName || '',
+      name: user.fullName || user.name || '',
+      fullName: user.fullName || user.name || '',
       nim: user.nim || '',
       major: user.major || '',
       className: user.className || ''
     };
+    
+    // Ensure name property exists for consistency
+    if (!finalStudentInfo.name && finalStudentInfo.fullName) {
+      finalStudentInfo.name = finalStudentInfo.fullName;
+    }
 
     const { exam } = appState;
     

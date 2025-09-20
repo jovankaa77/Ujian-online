@@ -436,7 +436,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             console.log("📷 Camera restarted successfully:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
             setIsCameraReady(true);
           } else {
-            setTimeout(checkVideoReady, 100);
+            studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown'
           }
         };
         
