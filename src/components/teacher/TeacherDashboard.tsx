@@ -19,7 +19,6 @@ interface TeacherDashboardProps {
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, navigateBack, canGoBack }) => {
   const [view, setView] = useState('search');
-  const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap'>('main');
   const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap' | 'voice_monitoring'>('main');
   const [searchCode, setSearchCode] = useState('');
   const [foundExam, setFoundExam] = useState<any>(null);
