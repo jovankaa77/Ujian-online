@@ -80,9 +80,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const maxCameraRetries = 5;
 
   useEffect(() => {
-    // Configure ONNX Runtime to find WASM files
-    ort.env.wasm.wasmPaths = '/';
-    
     // Initialize audio monitoring
     const initializeAudioMonitoring = async () => {
       try {
@@ -113,7 +110,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
           modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
           ortConfig: () => ({
-            executionProviders: ['wasm']
+            executionProviders: ['wasm'],
+            env: {
+              wasm: {
+                wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/'
+              }
+            }
           })
         });
         
@@ -365,7 +367,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
         modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
         ortConfig: () => ({
-          executionProviders: ['wasm']
+          executionProviders: ['wasm'],
+          env: {
+            wasm: {
+              wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/'
+            }
+          }
         })
       });
       
