@@ -54,7 +54,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [audioRecordingCount, setAudioRecordingCount] = useState(0);
   const [vadError, setVadError] = useState<string | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const speechStartTimeRef = useRef<number | null>(null);
+  const speechDetectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isRestartingAudio, setIsRestartingAudio] = useState(false);
   
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
@@ -101,11 +102,32 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         const vad = await (window as any).vad.MicVAD.new({
           stream: stream,
           onSpeechStart: () => {
-            console.log("🎤 Speech detected, starting recording...");
-            startAudioRecording(stream);
+            console.log("🎤 Speech start detected");
+            speechStartTimeRef.current = Date.now();
+            
+            // Start recording after 1 second of continuous speech
+            speechDetectionTimeoutRef.current = setTimeout(() => {
+              if (speechStartTimeRef.current) {
+                console.log("🎤 1 second of speech detected, starting recording...");
+                startAudioRecording(stream);
+              }
+            }, 1000); // 1 second delay
           },
           onSpeechEnd: () => {
-            console.log("🔇 Speech ended");
+            console.log("🔇 Speech ended, stopping recording if active");
+            speechStartTimeRef.current = null;
+            
+            // Clear the detection timeout if speech ends before 1 second
+            if (speechDetectionTimeoutRef.current) {
+              clearTimeout(speechDetectionTimeoutRef.current);
+              speechDetectionTimeoutRef.current = null;
+            }
+            
+            // Stop recording if currently recording
+            if (isRecordingAudio && mediaRecorder && mediaRecorder.state === 'recording') {
+              console.log("🛑 Stopping recording due to speech end");
+              mediaRecorder.stop();
+            }
           },
           onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
           baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
