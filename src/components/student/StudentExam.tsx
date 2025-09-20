@@ -419,6 +419,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     
     // Reinitialize camera
     try {
+    if (isRecording || audioRecordingCount >= 25) {
+      console.log("🚫 Cannot start recording - already recording or limit reached");
+      return;
+    }
+    
       setCameraError(null);
       setIsCameraReady(false);
       
@@ -637,6 +642,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       
       // Draw video frame to canvas
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        console.log("🎤 MediaRecorder stopped, processing audio...");
       
       // Convert to base64 with high quality
       const imageData = canvas.toDataURL('image/jpeg', 0.9);
@@ -649,6 +655,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       
       console.log("✅ Photo captured successfully:", canvas.width, "x", canvas.height);
       return imageData;
+      
+      console.log("✅ Recording started successfully");
       
     } catch (error) {
       console.error("Failed to capture photo:", error);
