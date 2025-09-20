@@ -55,9 +55,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [audioRecordingCount, setAudioRecordingCount] = useState(0);
   const [vadError, setVadError] = useState<string | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const [speechStartTime, setSpeechStartTime] = useState<number | null>(null);
+  const [speechDetected, setSpeechDetected] = useState(false);
   const speechStartTimeRef = useRef<number | null>(null);
   const speechDetectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const speechTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isRestartingAudio, setIsRestartingAudio] = useState(false);
   
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
