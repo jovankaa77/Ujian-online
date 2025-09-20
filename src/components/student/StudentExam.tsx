@@ -444,7 +444,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             console.log("📷 Camera restarted successfully:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
             setIsCameraReady(true);
           } else {
-            setTimeout(checkVideoReady, 100);
+            studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown'
           }
         };
         
@@ -1329,7 +1329,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             <div className="text-center">
               <div className="text-3xl font-mono bg-gray-900 px-6 py-3 rounded-lg mb-2">
                 {Math.floor(timeLeft / 3600).toString().padStart(2, '0')}:
-                {Math.floor((timeLeft % 3600) / 60).toString().padStart(2, '0')}:
+              {speechDetected && !isRecording && (
+                <div className="text-xs text-yellow-400 mt-1">
+                  👂 Mendeteksi suara...
+                </div>
+              )}
+              {isRecording && (
                 {(timeLeft % 60).toString().padStart(2, '0')}
               </div>
               <div className="flex justify-center space-x-4 text-sm">
@@ -1385,6 +1390,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                       <span className="ml-2">{String.fromCharCode(65 + i)}. {opt}</span>
                     </label>
                   ))}
+                </div>
+              )}
+              {audioRecordingCount >= 25 && (
+                <div className="text-xs text-orange-400 mt-1">
+                  ⚠️ Batas maksimal tercapai
                 </div>
               )}
               
