@@ -108,9 +108,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           },
           workletURL: '/vad.worklet.bundle.min.js',
           modelURL: '/silero_vad.onnx',
-          ortConfig: {
+          ortConfig: () => ({
             executionProviders: ['wasm']
-          }
+          })
         });
         
         setVadInstance(vad);
@@ -360,9 +360,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         },
         workletURL: '/vad.worklet.bundle.min.js',
         modelURL: '/silero_vad.onnx',
-        ortConfig: {
+        ortConfig: () => ({
           executionProviders: ['wasm']
-        }
+        })
       });
       
       setVadInstance(vad);
