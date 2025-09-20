@@ -15,7 +15,7 @@ const StudentAuthChoice: React.FC<StudentAuthChoiceProps> = ({ navigateTo, navig
         &larr; Kembali
       </button>
       
-      <h2 className="text-3xl font-bold mb-8">Portal Siswa</h2>
+      <h2 className="text-3xl font-bold mb-8">Portal Peserta Ujian</h2>
       <div className="flex space-x-4">
         <button 
           onClick={() => navigateTo('student_login')}
