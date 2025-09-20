@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, getDocs, updateDoc, doc, query, limit } from 'firebase/firestore';
-import { db, appId, storage } from '../../config/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 
@@ -48,24 +47,24 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [violationReason, setViolationReason] = useState('');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showCameraControls, setShowCameraControls] = useState(false);
-  
-  // Voice recording states
-  const [isRecording, setIsRecording] = useState(false);
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const [vadInstance, setVadInstance] = useState<MicVAD | null>(null);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioRecordingCount, setAudioRecordingCount] = useState(0);
-  const [speechDetected, setSpeechDetected] = useState(false);
-  const [speechStartTime, setSpeechStartTime] = useState<number | null>(null);
-  const speechTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-
-  // Anti-cheat states
-  const [attendancePhotoCount, setAttendancePhotoCount] = useState(0);
-  const [attendancePhotos, setAttendancePhotos] = useState<{[key: string]: string}>({});
+  const [vadError, setVadError] = useState<string | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const speechStartTimeRef = useRef<number | null>(null);
+  const speechDetectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isRestartingAudio, setIsRestartingAudio] = useState(false);
   
-  // Refs
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const attendancePhotoTimestamps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120];
+  const [attendancePhotos, setAttendancePhotos] = useState<{[key: string]: string}>({});
   const examStartTimeRef = useRef<Date | null>(null);
+  const [attendancePhotoCount, setAttendancePhotoCount] = useState(0);
   const attendanceIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const capturedMinutesRef = useRef<Set<number>>(new Set());
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -79,172 +78,17 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraInitRetryCount = useRef(0);
   const maxCameraRetries = 5;
-  
-  // Voice recording refs
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const voiceAnalyserRef = useRef<AnalyserNode | null>(null);
-  const voiceIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Voice recording functions
-  const startVoiceRecording = useCallback(async () => {
-    if (isRecording || audioRecordingCount >= 25 || isProcessingAudio) return;
-    
-    console.log("🎤 Starting voice recording...");
-    setIsProcessingAudio(true);
-    setIsRecording(true);
-    
-    try {
-      if (!audioStreamRef.current) {
-        console.log("❌ No audio stream available");
-        setIsRecording(false);
-        setIsProcessingAudio(false);
-        return;
-      }
-      
-      audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(audioStreamRef.current, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-      
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-      
-      mediaRecorder.onstop = () => {
-        console.log("🛑 Recording stopped, processing...");
-        stopVoiceRecording();
-      };
-      
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      
-      // Auto-stop after 10 seconds
-      setTimeout(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-      }, 10000);
-      
-    } catch (error) {
-      console.error("❌ Failed to start recording:", error);
-      setIsRecording(false);
-      setIsProcessingAudio(false);
-    }
-  }, [isRecording, audioRecordingCount, isProcessingAudio]);
-
-  const stopVoiceRecording = useCallback(async () => {
-    if (!isRecording || !mediaRecorderRef.current) return;
-    
-    console.log("🛑 Stopping voice recording...");
-    setIsRecording(false);
-    
-    try {
-      const startTime = speechStartTime || Date.now();
-      const duration = Date.now() - startTime;
-      
-      if (audioChunksRef.current.length > 0) {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        audioChunksRef.current = [];
-        
-        // Check minimum duration (0.5 seconds)
-        if (duration < 500) {
-          console.log("⚠️ Recording too short, discarding");
-          setIsProcessingAudio(false);
-          return;
-        }
-        
-        // Convert to base64 and save
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          try {
-            const fileName = `voice_${Date.now()}.webm`;
-            const filePath = `voice_recordings/${appState.exam.id}/${appState.sessionId}/${fileName}`;
-            
-            console.log("📤 Uploading audio to Firebase Storage...");
-            const storageRef = ref(storage, filePath);
-            const uploadResult = await uploadBytes(storageRef, audioBlob);
-            const downloadURL = await getDownloadURL(uploadResult.ref);
-            
-            console.log("✅ Audio uploaded successfully, saving to Firestore...");
-            
-            // Save recording info to Firestore
-            const sessionRef = doc(db, `artifacts/${appId}/public/data/exams/${appState.exam.id}/sessions`, appState.sessionId);
-            const recordingKey = `voiceRecording_${Date.now()}`;
-            
-            await updateDoc(sessionRef, {
-              [recordingKey]: {
-                audioURL: downloadURL,
-                fileName: fileName,
-                timestamp: new Date(),
-                duration: Math.round(duration / 1000),
-                studentId: user?.id || 'unknown',
-                studentName: studentInfo?.name || studentInfo?.fullName || user?.fullName || 'Unknown'
-              }
-            });
-            
-            // Increment counter AFTER successful save
-            setAudioRecordingCount(prev => {
-              const newCount = prev + 1;
-              console.log(`✅ Audio recording saved successfully! Count: ${newCount}`);
-              return newCount;
-            });
-            
-          } catch (error) {
-            console.error("❌ Failed to save audio recording:", error);
-          } finally {
-            setIsProcessingAudio(false);
-          }
-        };
-        
-        reader.readAsDataURL(audioBlob);
-      }
-      
-    } catch (error) {
-      console.error("❌ Error stopping recording:", error);
-      setIsRecording(false);
-      setIsProcessingAudio(false);
-    }
-  }, [isRecording, appState.exam?.id, appState.sessionId, user?.id, studentInfo, setAudioRecordingCount]);
-
-  // Voice Activity Detection
-  const handleVoiceActivity = useCallback((isSpeaking: boolean) => {
-    if (isFinished || audioRecordingCount >= 25) return;
-    
-    if (isSpeaking && !speechDetected) {
-      console.log("👂 Speech detected, starting timer...");
-      setSpeechDetected(true);
-      setSpeechStartTime(Date.now());
-      
-      // Start recording after 0.5 seconds of continuous speech
-      speechTimeoutRef.current = setTimeout(() => {
-        console.log("🎤 0.5 seconds of speech detected, starting recording...");
-        startVoiceRecording();
-      }, 500);
-      
-    } else if (!isSpeaking && speechDetected) {
-      console.log("🔇 Speech ended, stopping...");
-      setSpeechDetected(false);
-      setSpeechStartTime(null);
-      
-      // Stop recording immediately when speech ends
-      if (isRecording && !isProcessingAudio) {
-        stopVoiceRecording();
-      }
-    }
-  }, [speechDetected, isRecording, isProcessingAudio, startVoiceRecording, stopVoiceRecording]);
-
-  // Initialize Voice Activity Detection
   useEffect(() => {
-    if (isFinished || isLoading) return;
-    
-    const initializeVoiceDetection = async () => {
+    // Initialize audio monitoring
+    const initializeAudioMonitoring = async () => {
       try {
-        console.log("🎤 Initializing voice detection...");
+        // Check if VAD is available from global script
+        if (typeof window === 'undefined' || !(window as any).vad) {
+          throw new Error('VAD library not loaded. Please refresh the page.');
+        }
         
+        // Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
             echoCancellation: true,
@@ -253,140 +97,150 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           }
         });
         
-        audioStreamRef.current = stream;
+        setAudioStream(stream);
         
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const analyser = audioContext.createAnalyser();
-        const source = audioContext.createMediaStreamSource(stream);
+        // Initialize VAD
+        const vad = await (window as any).vad.MicVAD.new({
+          stream: stream,
+          onSpeechStart: () => {
+            console.log("🎤 Speech start detected");
+            speechStartTimeRef.current = Date.now();
+            
+            // Start recording after 1 second of continuous speech
+            speechDetectionTimeoutRef.current = setTimeout(() => {
+              if (speechStartTimeRef.current) {
+                console.log("🎤 1 second of speech detected, starting recording...");
+                startAudioRecording(stream);
+              }
+            }, 1000); // 1 second delay
+          },
+          onSpeechEnd: () => {
+            console.log("🔇 Speech ended, stopping recording if active");
+            speechStartTimeRef.current = null;
+            
+            // Clear the detection timeout if speech ends before 1 second
+            if (speechDetectionTimeoutRef.current) {
+              clearTimeout(speechDetectionTimeoutRef.current);
+              speechDetectionTimeoutRef.current = null;
+            }
+            
+            // Stop recording if currently recording
+            if (isRecordingAudio && mediaRecorder && mediaRecorder.state === 'recording') {
+              console.log("🛑 Stopping recording due to speech end");
+              mediaRecorder.stop();
+            }
+          },
+          onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
+          baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
+        });
         
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.8;
-        source.connect(analyser);
-        
-        voiceAnalyserRef.current = analyser;
-        
-        const checkVoiceActivity = () => {
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          analyser.getByteFrequencyData(dataArray);
-          
-          // Calculate RMS (Root Mean Square) for better voice detection
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i] * dataArray[i];
-          }
-          const rms = Math.sqrt(sum / dataArray.length);
-          
-          // Detect speech with lower threshold for better sensitivity
-          const isSpeaking = rms > 20;
-          handleVoiceActivity(isSpeaking);
-        };
-        
-        voiceIntervalRef.current = setInterval(checkVoiceActivity, 100);
-        console.log("✅ Voice detection initialized");
+        setVadInstance(vad);
+        vad.start();
+        console.log("✅ Voice Activity Detection initialized");
         
       } catch (error) {
-        console.error("❌ Failed to initialize voice detection:", error);
+        console.error("❌ Failed to initialize audio monitoring:", error);
+        setVadError(`Audio monitoring failed: ${error.message}`);
       }
     };
     
-    initializeVoiceDetection();
-    
-    return () => {
-      if (voiceIntervalRef.current) {
-        clearInterval(voiceIntervalRef.current);
-      }
-      if (speechTimeoutRef.current) {
-        clearTimeout(speechTimeoutRef.current);
-      }
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [isFinished, isLoading, handleVoiceActivity]);
-
-  // Initialize camera with retry mechanism
-  const initializeCamera = async (retryCount = 0) => {
-    try {
-      // Stop existing stream if any
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          track.stop();
-          console.log("🛑 Stopping existing camera track");
-        });
-      }
-      
-      setCameraError(null);
-      setIsCameraReady(false);
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          width: { ideal: 1280, min: 640 },
-          height: { ideal: 720, min: 480 },
-          facingMode: 'user'
-        },
-        audio: false
-      });
-      
-      streamRef.current = stream;
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-        videoRef.current.playsInline = true;
-        
-        // Wait for video to be ready with multiple checks
-        const checkVideoReady = () => {
-          if (videoRef.current && 
-              videoRef.current.readyState >= 2 && 
-              videoRef.current.videoWidth > 0 && 
-              videoRef.current.videoHeight > 0) {
-            console.log("📷 Camera ready:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
-            setIsCameraReady(true);
-            cameraInitRetryCount.current = 0; // Reset retry count on success
-          } else {
-            setTimeout(checkVideoReady, 100);
-          }
-        };
-        
-        videoRef.current.onloadedmetadata = checkVideoReady;
-        videoRef.current.oncanplay = checkVideoReady;
-        
-        // Fallback timeout
-        setTimeout(() => {
-          if (!isCameraReady && videoRef.current) {
-            console.log("📷 Camera timeout, forcing ready state");
-            setIsCameraReady(true);
-            cameraInitRetryCount.current = 0;
-          }
-        }, 5000);
-      }
-    } catch (error) {
-      console.error("Camera access failed:", error);
-      setCameraError(`Camera error: ${error.message}`);
-      
-      // Retry camera initialization
-      if (retryCount < maxCameraRetries) {
-        cameraInitRetryCount.current = retryCount + 1;
-        console.log(`🔄 Retrying camera initialization (${retryCount + 1}/${maxCameraRetries})`);
-        setTimeout(() => {
-          initializeCamera(retryCount + 1);
-        }, 2000); // Wait 2 seconds before retry
-      } else {
-        setIsCameraReady(false);
-        setCameraError("Camera failed after multiple attempts");
-      }
+    if (!isFinished && !isLoading && questions.length > 0) {
+      initializeAudioMonitoring();
     }
-  };
-
-  useEffect(() => {
-    // Start camera initialization immediately
-    initializeCamera();
     
     // Initialize audio context
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     
+    // Initialize camera with retry mechanism
+    const initializeCamera = async (retryCount = 0) => {
+      try {
+        // Stop existing stream if any
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => {
+            track.stop();
+            console.log("🛑 Stopping existing camera track");
+          });
+        }
+        
+        setCameraError(null);
+        setIsCameraReady(false);
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 },
+            facingMode: 'user'
+          },
+          audio: false
+        });
+        
+        streamRef.current = stream;
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.muted = true;
+          videoRef.current.playsInline = true;
+          
+          // Wait for video to be ready with multiple checks
+          const checkVideoReady = () => {
+            if (videoRef.current && 
+                videoRef.current.readyState >= 2 && 
+                videoRef.current.videoWidth > 0 && 
+                videoRef.current.videoHeight > 0) {
+              console.log("📷 Camera ready:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
+              setIsCameraReady(true);
+              cameraInitRetryCount.current = 0; // Reset retry count on success
+            } else {
+              setTimeout(checkVideoReady, 100);
+            }
+          };
+          
+          videoRef.current.onloadedmetadata = checkVideoReady;
+          videoRef.current.oncanplay = checkVideoReady;
+          
+          // Fallback timeout
+          setTimeout(() => {
+            if (!isCameraReady && videoRef.current) {
+              console.log("📷 Camera timeout, forcing ready state");
+              setIsCameraReady(true);
+              cameraInitRetryCount.current = 0;
+            }
+          }, 5000);
+        }
+      } catch (error) {
+        console.error("Camera access failed:", error);
+        setCameraError(`Camera error: ${error.message}`);
+        
+        // Retry camera initialization
+        if (retryCount < maxCameraRetries) {
+          cameraInitRetryCount.current = retryCount + 1;
+          console.log(`🔄 Retrying camera initialization (${retryCount + 1}/${maxCameraRetries})`);
+          setTimeout(() => {
+            initializeCamera(retryCount + 1);
+          }, 2000); // Wait 2 seconds before retry
+        } else {
+          setIsCameraReady(false);
+          setCameraError("Camera failed after multiple attempts");
+        }
+      }
+    };
+    
+    // Start camera initialization immediately
+    initializeCamera();
+    
     // Cleanup
     return () => {
+      // Cleanup audio monitoring
+      if (vadInstance) {
+        vadInstance.destroy();
+      }
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+      }
+      
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
           track.stop();
@@ -395,6 +249,153 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       }
     };
   }, []);
+
+  const startAudioRecording = (stream: MediaStream) => {
+    if (isRecordingAudio || !stream || audioRecordingCount >= 25) {
+      console.log("⚠️ Already recording, no stream available, or max recordings reached (25)");
+      return;
+    }
+    
+    try {
+      setIsRecordingAudio(true);
+      audioChunksRef.current = [];
+      
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      recorder.onstop = async () => {
+        console.log("🎵 Audio recording stopped, processing...");
+        
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          
+          // Convert to base64
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const base64Audio = reader.result as string;
+            
+            // Save to Firestore
+            const audioData = {
+              [`voiceRecording_${Date.now()}`]: {
+                audioData: base64Audio,
+                timestamp: new Date().toISOString(),
+                duration: 10,
+                studentId: user.id,
+                studentName: studentInfo.name
+              }
+            };
+            
+            try {
+              await updateDoc(sessionDocRef, audioData);
+              setAudioRecordingCount(prev => prev + 1);
+              console.log("✅ Audio recording saved to Firestore");
+            } catch (error) {
+              console.error("❌ Failed to save audio recording:", error);
+            }
+          };
+          
+          reader.readAsDataURL(audioBlob);
+        }
+        
+        setIsRecordingAudio(false);
+        setMediaRecorder(null);
+      };
+      
+      setMediaRecorder(recorder);
+      recorder.start();
+      
+      // Stop recording after 10 seconds
+      recordingTimeoutRef.current = setTimeout(() => {
+        if (recorder.state === 'recording') {
+          recorder.stop();
+        }
+      }, 10000);
+      
+      console.log("🔴 Started 10-second audio recording");
+      
+    } catch (error) {
+      console.error("❌ Failed to start audio recording:", error);
+      setIsRecordingAudio(false);
+    }
+  };
+
+  // Function to restart audio monitoring
+  const restartAudioMonitoring = async () => {
+    if (isRestartingAudio) return;
+    
+    setIsRestartingAudio(true);
+    console.log("🔄 Manually restarting audio monitoring...");
+    
+    try {
+      // Cleanup existing audio resources
+      if (vadInstance) {
+        vadInstance.destroy();
+        setVadInstance(null);
+      }
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+      }
+      
+      // Reset states
+      setVadError(null);
+      setIsRecordingAudio(false);
+      setMediaRecorder(null);
+      
+      // Wait a moment before reinitializing
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Check if VAD is available from global script
+      if (typeof window === 'undefined' || !(window as any).vad) {
+        throw new Error('VAD library not loaded. Please refresh the page.');
+      }
+      
+      // Reinitialize audio monitoring
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
+      setAudioStream(stream);
+      
+      // Initialize VAD with new stream
+      const vad = await (window as any).vad.MicVAD.new({
+        stream: stream,
+        onSpeechStart: () => {
+          console.log("🎤 Speech detected, starting recording...");
+          startAudioRecording(stream);
+        },
+        onSpeechEnd: () => {
+          console.log("🔇 Speech ended");
+        },
+        onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
+        baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
+      });
+      
+      setVadInstance(vad);
+      vad.start();
+      console.log("✅ Audio monitoring restarted successfully");
+      
+    } catch (error) {
+      console.error("❌ Failed to restart audio monitoring:", error);
+      setVadError(`Audio restart failed: ${error.message}`);
+    } finally {
+      setIsRestartingAudio(false);
+    }
+  };
 
   // Function to manually restart camera
   const restartCamera = async () => {
@@ -435,7 +436,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             console.log("📷 Camera restarted successfully:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
             setIsCameraReady(true);
           } else {
-            setTimeout(checkVideoReady, 100);
+            studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown'
           }
         };
         
@@ -505,6 +506,19 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     return () => {
       if (attendanceIntervalRef.current) {
         clearInterval(attendanceIntervalRef.current);
+      }
+      
+      // Stop audio monitoring
+      if (vadInstance) {
+        vadInstance.destroy();
+        setVadInstance(null);
+      }
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
       }
     };
   }, [isFinished, isLoading, questions.length, isCameraReady]);
@@ -1237,16 +1251,56 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         )}
       </div>
       
-      {/* Voice Activity Monitor */}
+      {/* Audio Control Panel */}
       <div className="fixed top-4 left-4 bg-gray-800 text-white px-3 py-2 rounded text-xs z-40 border">
-        <div className="text-sm text-gray-400 space-y-1">
-          <div>🎤 Suara Manusia: {audioRecordingCount}/25</div>
-          <div>📸 Foto Absen: {attendancePhotoCount}</div>
-          {isProcessingAudio && <div className="text-yellow-400">⏳ Memproses rekaman...</div>}
-          {speechDetected && !isRecording && <div className="text-blue-400">👂 Mendeteksi suara...</div>}
-          {isRecording && <div className="text-red-400">🔴 Merekam: {Math.floor((Date.now() - (speechStartTime || 0)) / 1000)}s</div>}
-          {audioRecordingCount >= 25 && <div className="text-yellow-400">⚠️ Batas rekaman tercapai</div>}
+        <div className="mb-2">
+          {vadInstance ? (
+            <span className="text-green-400">🔊 Audio Monitor: Active</span>
+          ) : vadError ? (
+            <span className="text-red-400">🔇 Audio: Error</span>
+          ) : isRestartingAudio ? (
+            <span className="text-yellow-400">🔄 Audio: Restarting...</span>
+          ) : (
+            <span className="text-yellow-400">🔊 Audio: Initializing</span>
+          )}
         </div>
+        
+        <div className="text-xs text-gray-400 mb-2">
+          Jumlah Pelanggaran: {violations}/3
+        </div>
+        <div className="text-xs text-blue-400 mb-2">
+          📸 Foto Absen: {attendancePhotoCount}
+        </div>
+        <div className="text-xs text-purple-400 mb-2">
+          🎤 Human Voice: {audioRecordingCount}
+        </div>
+        
+        {isRecordingAudio && (
+          <div className="text-xs text-red-400 mb-2 animate-pulse">
+            🔴 Recording Audio...
+          </div>
+        )}
+        
+        {/* Audio Control Button */}
+        <button
+          onClick={restartAudioMonitoring}
+          disabled={isRestartingAudio}
+          className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-1 px-2 rounded disabled:bg-purple-400"
+        >
+          {isRestartingAudio ? '🔄 Restarting...' : '🔄 Restart Audio'}
+        </button>
+        
+        {vadError && (
+          <div className="mt-1 text-xs text-red-400 text-center">
+            {vadError}
+          </div>
+        )}
+        
+        {streamRef.current && (
+          <div className="text-xs text-gray-400 mt-1">
+            Stream: {streamRef.current.active ? '🟢 Active' : '🔴 Inactive'}
+          </div>
+        )}
       </div>
       
       {/* Hidden canvas for photo capture */}
