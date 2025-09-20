@@ -4,6 +4,7 @@ import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 import { MicVAD, utils } from '@ricky0123/vad-web';
+import * as ort from 'onnxruntime-web';
 
 interface Question {
   id: string;
@@ -79,6 +80,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const maxCameraRetries = 5;
 
   useEffect(() => {
+    // Configure ONNX Runtime to find WASM files
+    ort.env.wasm.wasmPaths = '/';
+    
     // Initialize audio monitoring
     const initializeAudioMonitoring = async () => {
       try {
@@ -106,8 +110,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           onVADMisfire: () => {
             console.log("🔊 VAD misfire (false positive)");
           },
-          workletURL: '/vad.worklet.bundle.min.js',
-          modelURL: '/silero_vad.onnx',
+          workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
+          modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
           ortConfig: () => ({
             executionProviders: ['wasm']
           })
@@ -358,8 +362,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         onVADMisfire: () => {
           console.log("🔊 VAD misfire (false positive)");
         },
-        workletURL: '/vad.worklet.bundle.min.js',
-        modelURL: '/silero_vad.onnx',
+        workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
+        modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
         ortConfig: () => ({
           executionProviders: ['wasm']
         })
