@@ -53,9 +53,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioRecordingCount, setAudioRecordingCount] = useState(0);
+  const [vadStatus, setVadStatus] = useState<'initializing' | 'active' | 'error' | 'inactive'>('inactive');
   const [vadError, setVadError] = useState<string | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const speechDetectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSpeechActiveRef = useRef(false);
+  const speechStartTimeRef = useRef<number | null>(null);
   
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -78,51 +82,95 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const maxCameraRetries = 5;
 
   useEffect(() => {
-    // Initialize audio monitoring
+    // Initialize audio monitoring after camera is ready
     const initializeAudioMonitoring = async () => {
+      if (isFinished || !isCameraReady) {
+        console.log("⏸️ Skipping audio init - exam finished or camera not ready");
+        return;
+      }
+      
+      setVadStatus('initializing');
+      setVadError(null);
+      
       try {
-        // Request microphone access
+        console.log("🎤 Requesting microphone access...");
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true
+            autoGainControl: true,
+            sampleRate: 16000
           }
         });
         
+        console.log("✅ Microphone access granted");
         setAudioStream(stream);
         
-        // Initialize VAD
+        // Initialize VAD with proper configuration
+        console.log("🔧 Initializing Voice Activity Detection...");
         const vad = await MicVAD.new({
           stream: stream,
+          positiveSpeechThreshold: 0.8,
+          negativeSpeechThreshold: 0.35,
+          redemptionFrames: 8,
+          frameSamples: 1536,
           onSpeechStart: () => {
-            console.log("🎤 Speech detected, starting recording...");
-            startAudioRecording(stream);
+            console.log("🗣️ Speech start detected");
+            isSpeechActiveRef.current = true;
+            speechStartTimeRef.current = Date.now();
+            
+            // Clear any existing timeout
+            if (speechDetectionTimeoutRef.current) {
+              clearTimeout(speechDetectionTimeoutRef.current);
+            }
+            
+            // Set timeout for 2 seconds to trigger recording
+            speechDetectionTimeoutRef.current = setTimeout(() => {
+              if (isSpeechActiveRef.current && speechStartTimeRef.current) {
+                const speechDuration = Date.now() - speechStartTimeRef.current;
+                if (speechDuration >= 2000) {
+                  console.log("🎤 Speech detected for 2+ seconds, starting recording...");
+                  startAudioRecording(stream);
+                }
+              }
+            }, 2000);
           },
           onSpeechEnd: () => {
-            console.log("🔇 Speech ended");
+            console.log("🔇 Speech end detected");
+            isSpeechActiveRef.current = false;
+            speechStartTimeRef.current = null;
+            
+            // Clear the timeout if speech ends before 2 seconds
+            if (speechDetectionTimeoutRef.current) {
+              clearTimeout(speechDetectionTimeoutRef.current);
+              speechDetectionTimeoutRef.current = null;
+            }
           },
           onVADMisfire: () => {
-            console.log("🔊 VAD misfire (false positive)");
+            console.log("🔊 VAD misfire detected (false positive)");
           },
-          workletURL: '/vad.worklet.bundle.min.js',
-          modelURL: '/silero_vad.onnx',
+          workletURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/vad.worklet.bundle.min.js',
+          modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/silero_vad.onnx',
           ortConfig: {
-            executionProviders: ['wasm']
+            executionProviders: ['wasm'],
+            logSeverityLevel: 3
           }
         });
         
         setVadInstance(vad);
-        vad.start();
+        await vad.start();
+        setVadStatus('active');
         console.log("✅ Voice Activity Detection initialized");
         
       } catch (error) {
         console.error("❌ Failed to initialize audio monitoring:", error);
-        setVadError(`Audio monitoring failed: ${error.message}`);
+        setVadStatus('error');
+        setVadError(`Audio monitoring failed: ${error.message || 'Unknown error'}`);
       }
     };
     
-    if (!isFinished && !isLoading && questions.length > 0) {
+    // Only initialize audio after camera is ready and exam has started
+    if (!isFinished && !isLoading && questions.length > 0 && isCameraReady) {
       initializeAudioMonitoring();
     }
     
@@ -210,14 +258,30 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     return () => {
       // Cleanup audio monitoring
       if (vadInstance) {
+        try {
+          vadInstance.pause();
+        } catch (e) {
+          console.log("VAD already stopped");
+        }
         vadInstance.destroy();
+        setVadInstance(null);
       }
       if (audioStream) {
         audioStream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
       }
       if (recordingTimeoutRef.current) {
         clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
       }
+      if (speechDetectionTimeoutRef.current) {
+        clearTimeout(speechDetectionTimeoutRef.current);
+        speechDetectionTimeoutRef.current = null;
+      }
+      
+      setVadStatus('inactive');
+      setIsRecordingAudio(false);
+      setMediaRecorder(null);
       
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
@@ -226,20 +290,23 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         });
       }
     };
-  }, []);
+  }, [isCameraReady, isFinished, isLoading, questions.length]);
 
   const startAudioRecording = (stream: MediaStream) => {
-    if (isRecordingAudio || !stream) {
-      console.log("⚠️ Already recording or no stream available");
+    if (isRecordingAudio || !stream || isFinished) {
+      console.log("⚠️ Cannot start recording - already recording, no stream, or exam finished");
       return;
     }
     
     try {
+      console.log("🔴 Starting 10-second audio recording...");
       setIsRecordingAudio(true);
       audioChunksRef.current = [];
       
       const recorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+          ? 'audio/webm;codecs=opus' 
+          : 'audio/webm'
       });
       
       recorder.ondataavailable = (event) => {
@@ -249,7 +316,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       };
       
       recorder.onstop = async () => {
-        console.log("🎵 Audio recording stopped, processing...");
+        console.log("🎵 Audio recording completed, processing...");
         
         if (audioChunksRef.current.length > 0) {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
@@ -257,31 +324,42 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           // Convert to base64
           const reader = new FileReader();
           reader.onloadend = async () => {
-            const base64Audio = reader.result as string;
-            
-            // Save to Firestore
-            const audioData = {
-              [`voiceRecording_${Date.now()}`]: {
-                audioData: base64Audio,
-                timestamp: new Date().toISOString(),
-                duration: 10,
-                studentId: user.id,
-                studentName: studentInfo.name
-              }
-            };
-            
             try {
+              const base64Audio = reader.result as string;
+              
+              // Save to Firestore
+              const audioData = {
+                [`voiceRecording_${Date.now()}`]: {
+                  audioData: base64Audio,
+                  timestamp: new Date().toISOString(),
+                  duration: 10,
+                  studentId: user.id,
+                  studentName: studentInfo.name
+                }
+              };
+              
               await updateDoc(sessionDocRef, audioData);
               setAudioRecordingCount(prev => prev + 1);
-              console.log("✅ Audio recording saved to Firestore");
+              console.log("✅ Voice recording saved to Firestore");
             } catch (error) {
-              console.error("❌ Failed to save audio recording:", error);
+              console.error("❌ Failed to save voice recording:", error);
             }
           };
           
+          reader.onerror = () => {
+            console.error("❌ Failed to convert audio to base64");
+            setIsRecordingAudio(false);
+          };
+          
           reader.readAsDataURL(audioBlob);
+        } else {
+          console.log("⚠️ No audio data captured");
+          setIsRecordingAudio(false);
         }
-        
+      };
+      
+      recorder.onerror = (event) => {
+        console.error("❌ MediaRecorder error:", event);
         setIsRecordingAudio(false);
         setMediaRecorder(null);
       };
@@ -293,14 +371,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       recordingTimeoutRef.current = setTimeout(() => {
         if (recorder.state === 'recording') {
           recorder.stop();
+          console.log("⏹️ 10-second recording completed");
         }
+        setIsRecordingAudio(false);
+        setMediaRecorder(null);
       }, 10000);
-      
-      console.log("🔴 Started 10-second audio recording");
       
     } catch (error) {
       console.error("❌ Failed to start audio recording:", error);
       setIsRecordingAudio(false);
+      setMediaRecorder(null);
     }
   };
 
@@ -1204,22 +1284,26 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           🎤 Human Voice: {audioRecordingCount}
         </div>
         <div className="text-xs text-gray-400 mt-1">
-          {vadInstance ? (
-            <span className="text-green-400">🔊 Audio Monitor: Active</span>
-          ) : vadError ? (
-            <span className="text-red-400">🔇 Audio: Error</span>
-          ) : (
-            <span className="text-yellow-400">🔊 Audio: Initializing</span>
-          )}
+          <span className={`${
+            vadStatus === 'active' ? 'text-green-400' :
+            vadStatus === 'error' ? 'text-red-400' :
+            vadStatus === 'initializing' ? 'text-yellow-400' :
+            'text-gray-400'
+          }`}>
+            {vadStatus === 'active' ? '🔊 Audio Monitor: Active' :
+             vadStatus === 'error' ? '🔇 Audio: Error' :
+             vadStatus === 'initializing' ? '🔊 Audio: Initializing...' :
+             '🔇 Audio: Inactive'}
+          </span>
         </div>
         {isRecordingAudio && (
           <div className="text-xs text-red-400 mt-1 animate-pulse">
-            🔴 Recording Audio...
+            🔴 Recording Voice... (10s)
           </div>
         )}
-        {streamRef.current && (
+        {vadError && (
           <div className="text-xs text-gray-400">
-            Stream: {streamRef.current.active ? '🟢 Active' : '🔴 Inactive'}
+            Error: {vadError.substring(0, 30)}...
           </div>
         )}
       </div>
