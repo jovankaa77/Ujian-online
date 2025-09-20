@@ -13,12 +13,14 @@ interface DeviceChecks {
   device: boolean | null;
   camera: boolean | null;
   screenCount: boolean | null;
+  microphone: boolean | null;
 }
 
 const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateBack, appState, user }) => {
   const { studentInfo } = appState;
-  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null });
+  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null });
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     // Enhanced mobile detection
@@ -46,20 +48,57 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     
     if (isMobile) return;
     
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        setChecks(c => ({ ...c, camera: true }));
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+    // Check camera and microphone permissions
+    const checkMediaDevices = async () => {
+      try {
+        // Request both video and audio permissions
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
+        });
+        
+        // Check if we got both video and audio tracks
+        const videoTracks = stream.getVideoTracks();
+        const audioTracks = stream.getAudioTracks();
+        
+        setChecks(c => ({ 
+          ...c, 
+          camera: videoTracks.length > 0,
+          microphone: audioTracks.length > 0
+        }));
+        
+        if (videoRef.current && videoTracks.length > 0) {
+          // Create video-only stream for display
+          const videoStream = new MediaStream(videoTracks);
+          videoRef.current.srcObject = videoStream;
         }
-      })
-      .catch(err => {
+        
+        // Store audio stream reference for later use
+        if (audioTracks.length > 0) {
+          audioRef.current = new MediaStream(audioTracks);
+        }
+        
+      } catch (err) {
         console.error("Error accessing media devices.", err);
-        setChecks(c => ({ ...c, camera: false }));
-      });
+        
+        // Try to determine which permission failed
+        try {
+          // Try video only
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          setChecks(c => ({ ...c, camera: true, microphone: false }));
+          if (videoRef.current) {
+            videoRef.current.srcObject = videoStream;
+          }
+        } catch (videoErr) {
+          setChecks(c => ({ ...c, camera: false, microphone: false }));
+        }
+      }
+    };
+    
+    checkMediaDevices();
   }, []);
 
-  const allChecksPassed = checks.device && checks.camera && checks.screenCount;
+  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone;
 
   const startExam = async () => {
     // Request fullscreen immediately on user interaction
@@ -180,6 +219,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           {renderCheckItem("Akses dari Desktop", checks.device)}
           {renderCheckItem("Layar Tunggal", checks.screenCount)}
           {renderCheckItem("Akses Kamera", checks.camera)}
+          {renderCheckItem("Akses Mikrofon", checks.microphone)}
         </ul>
         
         {checks.device === false && (
@@ -200,6 +240,12 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           </p>
         )}
         
+        {checks.microphone === false && (
+          <p className="text-red-400 text-center mb-4">
+            ⚠️ Mohon izinkan akses mikrofon di browser Anda untuk monitoring audio, lalu segarkan halaman ini.
+          </p>
+        )}
+        
         <div className="my-4 w-full aspect-video bg-gray-900 rounded-md overflow-hidden">
           <video 
             ref={videoRef} 
@@ -213,8 +259,17 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         {checks.device && (
           <div className="mb-4 p-3 bg-blue-900 border border-blue-500 rounded-md">
             <p className="text-blue-300 text-sm">
-              ℹ️ <strong>Penting:</strong> Ujian akan otomatis masuk mode fullscreen. 
-              Keluar dari fullscreen akan dianggap sebagai pelanggaran.
+              ℹ️ <strong>Penting:</strong> Ujian akan otomatis masuk mode fullscreen dan mengaktifkan monitoring audio. 
+              Keluar dari fullscreen atau aktivitas suara akan direkam sebagai bukti pengawasan.
+            </p>
+          </div>
+        )}
+        
+        {checks.device && checks.camera && checks.screenCount && !checks.microphone && (
+          <div className="mb-4 p-3 bg-red-900 border border-red-500 rounded-md">
+            <p className="text-red-300 text-sm">
+              🚫 <strong>Akses Mikrofon Diperlukan:</strong> Sistem memerlukan akses mikrofon untuk monitoring audio selama ujian. 
+              Tanpa izin mikrofon, Anda tidak dapat memulai ujian.
             </p>
           </div>
         )}
@@ -224,7 +279,12 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           disabled={!allChecksPassed} 
           className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed"
         >
-          {allChecksPassed ? 'Mulai Ujian' : 'Menunggu Pemeriksaan Selesai'}
+          {allChecksPassed ? 'Mulai Ujian' : 
+           checks.device === false ? 'Gunakan Desktop/Laptop' :
+           checks.screenCount === false ? 'Gunakan Layar Tunggal' :
+           checks.camera === false ? 'Izinkan Akses Kamera' :
+           checks.microphone === false ? 'Izinkan Akses Mikrofon' :
+           'Menunggu Pemeriksaan Selesai'}
         </button>
       </div>
     </div>
