@@ -56,6 +56,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [vadError, setVadError] = useState<string | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isRestartingAudio, setIsRestartingAudio] = useState(false);
   
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -301,6 +302,78 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     } catch (error) {
       console.error("❌ Failed to start audio recording:", error);
       setIsRecordingAudio(false);
+    }
+  };
+
+  // Function to restart audio monitoring
+  const restartAudioMonitoring = async () => {
+    if (isRestartingAudio) return;
+    
+    setIsRestartingAudio(true);
+    console.log("🔄 Manually restarting audio monitoring...");
+    
+    try {
+      // Cleanup existing audio resources
+      if (vadInstance) {
+        vadInstance.destroy();
+        setVadInstance(null);
+      }
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+      }
+      
+      // Reset states
+      setVadError(null);
+      setIsRecordingAudio(false);
+      setMediaRecorder(null);
+      
+      // Wait a moment before reinitializing
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Reinitialize audio monitoring
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
+      setAudioStream(stream);
+      
+      // Initialize VAD with new stream
+      const vad = await MicVAD.new({
+        stream: stream,
+        onSpeechStart: () => {
+          console.log("🎤 Speech detected, starting recording...");
+          startAudioRecording(stream);
+        },
+        onSpeechEnd: () => {
+          console.log("🔇 Speech ended");
+        },
+        onVADMisfire: () => {
+          console.log("🔊 VAD misfire (false positive)");
+        },
+        workletURL: '/vad.worklet.bundle.min.js',
+        modelURL: '/silero_vad.onnx',
+        ortConfig: {
+          executionProviders: ['wasm']
+        }
+      });
+      
+      setVadInstance(vad);
+      vad.start();
+      console.log("✅ Audio monitoring restarted successfully");
+      
+    } catch (error) {
+      console.error("❌ Failed to restart audio monitoring:", error);
+      setVadError(`Audio restart failed: ${error.message}`);
+    } finally {
+      setIsRestartingAudio(false);
     }
   };
 
@@ -1158,6 +1231,58 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         )}
       </div>
       
+      {/* Audio Control Panel */}
+      <div className="fixed top-4 left-4 bg-gray-800 text-white px-3 py-2 rounded text-xs z-40 border">
+        <div className="mb-2">
+          {vadInstance ? (
+            <span className="text-green-400">🔊 Audio Monitor: Active</span>
+          ) : vadError ? (
+            <span className="text-red-400">🔇 Audio: Error</span>
+          ) : isRestartingAudio ? (
+            <span className="text-yellow-400">🔄 Audio: Restarting...</span>
+          ) : (
+            <span className="text-yellow-400">🔊 Audio: Initializing</span>
+          )}
+        </div>
+        
+        <div className="text-xs text-gray-400 mb-2">
+          Jumlah Pelanggaran: {violations}/3
+        </div>
+        <div className="text-xs text-blue-400 mb-2">
+          📸 Foto Absen: {attendancePhotoCount}
+        </div>
+        <div className="text-xs text-purple-400 mb-2">
+          🎤 Human Voice: {audioRecordingCount}
+        </div>
+        
+        {isRecordingAudio && (
+          <div className="text-xs text-red-400 mb-2 animate-pulse">
+            🔴 Recording Audio...
+          </div>
+        )}
+        
+        {/* Audio Control Button */}
+        <button
+          onClick={restartAudioMonitoring}
+          disabled={isRestartingAudio}
+          className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-1 px-2 rounded disabled:bg-purple-400"
+        >
+          {isRestartingAudio ? '🔄 Restarting...' : '🔄 Restart Audio'}
+        </button>
+        
+        {vadError && (
+          <div className="mt-1 text-xs text-red-400 text-center">
+            {vadError}
+          </div>
+        )}
+        
+        {streamRef.current && (
+          <div className="text-xs text-gray-400 mt-1">
+            Stream: {streamRef.current.active ? '🟢 Active' : '🔴 Inactive'}
+          </div>
+        )}
+      </div>
+      
       {/* Hidden canvas for photo capture */}
       <canvas 
         ref={canvasRef}
@@ -1169,60 +1294,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         }}
       />
       
-      {/* Camera status indicator with more detail */}
-      <div className="fixed top-4 left-4 bg-gray-800 text-white px-3 py-2 rounded text-xs z-40 border">
-        {isCameraReady ? (
-          <div className="text-green-400">
-            ✅ Camera Ready
-            {videoRef.current && (
-              <div className="text-xs text-gray-300">
-                {videoRef.current.videoWidth}x{videoRef.current.videoHeight}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            {cameraError ? (
-              <>
-                <div className="text-red-400">❌ Camera Error</div>
-                <div className="text-xs text-gray-300">
-                  Retry {cameraInitRetryCount.current}/{maxCameraRetries}
-                </div>
-              </>
-            ) : (
-              <div className="text-yellow-400">⏳ Initializing Camera...</div>
-            )}
-          </div>
-        )}
-        <div className="text-xs text-gray-400 mt-1">
-          Jumlah Pelanggaran: {violations}/3
-        </div>
-        <div className="text-xs text-blue-400 mt-1">
-          📸 Foto Absen: {attendancePhotoCount}
-        </div>
-        <div className="text-xs text-purple-400 mt-1">
-          🎤 Human Voice: {audioRecordingCount}
-        </div>
-        <div className="text-xs text-gray-400 mt-1">
-          {vadInstance ? (
-            <span className="text-green-400">🔊 Audio Monitor: Active</span>
-          ) : vadError ? (
-            <span className="text-red-400">🔇 Audio: Error</span>
-          ) : (
-            <span className="text-yellow-400">🔊 Audio: Initializing</span>
-          )}
-        </div>
-        {isRecordingAudio && (
-          <div className="text-xs text-red-400 mt-1 animate-pulse">
-            🔴 Recording Audio...
-          </div>
-        )}
-        {streamRef.current && (
-          <div className="text-xs text-gray-400">
-            Stream: {streamRef.current.active ? '🟢 Active' : '🔴 Inactive'}
-          </div>
-        )}
-      </div>
 
       <div className="bg-gray-800 p-4 rounded-lg shadow-lg sticky top-4 z-10 flex justify-between items-center">
         <div className="w-full">
