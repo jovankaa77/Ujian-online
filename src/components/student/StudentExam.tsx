@@ -3,7 +3,6 @@ import { collection, getDocs, updateDoc, doc, query, limit } from 'firebase/fire
 import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
-import { MicVAD, utils } from '@ricky0123/vad-web';
 
 interface Question {
   id: string;
@@ -82,6 +81,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Initialize audio monitoring
     const initializeAudioMonitoring = async () => {
       try {
+        // Check if VAD is available from global script
+        if (typeof window === 'undefined' || !(window as any).vad) {
+          throw new Error('VAD library not loaded. Please refresh the page.');
+        }
+        
         // Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
@@ -94,7 +98,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         setAudioStream(stream);
         
         // Initialize VAD
-        const vad = await MicVAD.new({
+        const vad = await (window as any).vad.MicVAD.new({
           stream: stream,
           onSpeechStart: () => {
             console.log("🎤 Speech detected, starting recording...");
@@ -103,14 +107,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           onSpeechEnd: () => {
             console.log("🔇 Speech ended");
           },
-          onVADMisfire: () => {
-            console.log("🔊 VAD misfire (false positive)");
-          },
-          workletURL: '/vad.worklet.bundle.min.js',
-          modelURL: '/silero_vad.onnx',
-          ortConfig: {
-            executionProviders: ['wasm']
-          }
+          onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
+          baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
         });
         
         setVadInstance(vad);
@@ -334,6 +332,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       // Wait a moment before reinitializing
       await new Promise(resolve => setTimeout(resolve, 1000));
       
+      // Check if VAD is available from global script
+      if (typeof window === 'undefined' || !(window as any).vad) {
+        throw new Error('VAD library not loaded. Please refresh the page.');
+      }
+      
       // Reinitialize audio monitoring
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -346,7 +349,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       setAudioStream(stream);
       
       // Initialize VAD with new stream
-      const vad = await MicVAD.new({
+      const vad = await (window as any).vad.MicVAD.new({
         stream: stream,
         onSpeechStart: () => {
           console.log("🎤 Speech detected, starting recording...");
@@ -355,14 +358,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         onSpeechEnd: () => {
           console.log("🔇 Speech ended");
         },
-        onVADMisfire: () => {
-          console.log("🔊 VAD misfire (false positive)");
-        },
-        workletURL: '/vad.worklet.bundle.min.js',
-        modelURL: '/silero_vad.onnx',
-        ortConfig: {
-          executionProviders: ['wasm']
-        }
+        onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
+        baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
       });
       
       setVadInstance(vad);
