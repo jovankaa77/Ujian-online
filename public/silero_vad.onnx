@@ -1,0 +1,9 @@
+// This is a placeholder for the Silero VAD ONNX model
+// In a real implementation, you would need to download the actual model file
+// from the Silero VAD repository or the @ricky0123/vad-web package
+
+// The actual file would be a binary ONNX model file
+// For this demo, we're creating a placeholder that won't actually work
+// but prevents 404 errors during development
+
+console.log("Silero VAD model placeholder loaded");

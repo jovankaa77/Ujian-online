@@ -8,6 +8,7 @@ import TeacherResultsDashboard from './TeacherResultsDashboard';
 import TeacherProctoringDashboard from './TeacherProctoringDashboard';
 import QuestionManager from './QuestionManager';
 import TeacherAttendanceRecap from './TeacherAttendanceRecap';
+import TeacherVoiceMonitoring from './TeacherVoiceMonitoring';
 
 interface TeacherDashboardProps {
   user?: any;
@@ -19,6 +20,7 @@ interface TeacherDashboardProps {
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, navigateBack, canGoBack }) => {
   const [view, setView] = useState('search');
   const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap'>('main');
+  const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap' | 'voice_monitoring'>('main');
   const [searchCode, setSearchCode] = useState('');
   const [foundExam, setFoundExam] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -91,6 +93,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
         break;
       case 'attendance_recap':
         setCurrentView('attendance_recap');
+        break;
+      case 'voice_monitoring':
+        setCurrentView('voice_monitoring');
         break;
       default:
         navigateTo(page, data);
@@ -216,6 +221,16 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
   if (currentView === 'attendance_recap') {
     return (
       <TeacherAttendanceRecap 
+        navigateTo={navigateTo}
+        navigateBack={handleBackToMain}
+        appState={{ exam: currentExam }}
+      />
+    );
+  }
+
+  if (currentView === 'voice_monitoring') {
+    return (
+      <TeacherVoiceMonitoring 
         navigateTo={navigateTo}
         navigateBack={handleBackToMain}
         appState={{ exam: currentExam }}
@@ -384,6 +399,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                   className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
                 >
                   Rekap Absen
+                </button>
+                <button 
+                  onClick={() => handleNavigateToFeature('voice_monitoring', { exam: foundExam })} 
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
+                >
+                  Human Voice
                 </button>
               </div>
             </div>

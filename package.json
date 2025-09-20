@@ -12,6 +12,7 @@
     "build:vercel": "npm run build"
   },
   "dependencies": {
+    "@ricky0123/vad-web": "^0.0.27",
     "firebase": "^12.1.0",
     "jspdf": "^3.0.1",
     "jspdf-autotable": "^5.0.2",

@@ -3,6 +3,7 @@ import { collection, getDocs, updateDoc, doc, query, limit } from 'firebase/fire
 import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
+import { MicVAD, utils } from '@ricky0123/vad-web';
 
 interface Question {
   id: string;
@@ -47,6 +48,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [violationReason, setViolationReason] = useState('');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showCameraControls, setShowCameraControls] = useState(false);
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const [vadInstance, setVadInstance] = useState<MicVAD | null>(null);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioRecordingCount, setAudioRecordingCount] = useState(0);
+  const [vadError, setVadError] = useState<string | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -69,6 +78,54 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const maxCameraRetries = 5;
 
   useEffect(() => {
+    // Initialize audio monitoring
+    const initializeAudioMonitoring = async () => {
+      try {
+        // Request microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+        
+        setAudioStream(stream);
+        
+        // Initialize VAD
+        const vad = await MicVAD.new({
+          stream: stream,
+          onSpeechStart: () => {
+            console.log("🎤 Speech detected, starting recording...");
+            startAudioRecording(stream);
+          },
+          onSpeechEnd: () => {
+            console.log("🔇 Speech ended");
+          },
+          onVADMisfire: () => {
+            console.log("🔊 VAD misfire (false positive)");
+          },
+          workletURL: '/vad.worklet.bundle.min.js',
+          modelURL: '/silero_vad.onnx',
+          ortConfig: {
+            executionProviders: ['wasm']
+          }
+        });
+        
+        setVadInstance(vad);
+        vad.start();
+        console.log("✅ Voice Activity Detection initialized");
+        
+      } catch (error) {
+        console.error("❌ Failed to initialize audio monitoring:", error);
+        setVadError(`Audio monitoring failed: ${error.message}`);
+      }
+    };
+    
+    if (!isFinished && !isLoading && questions.length > 0) {
+      initializeAudioMonitoring();
+    }
+    
     // Initialize audio context
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     
@@ -151,6 +208,17 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     
     // Cleanup
     return () => {
+      // Cleanup audio monitoring
+      if (vadInstance) {
+        vadInstance.destroy();
+      }
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+      }
+      
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
           track.stop();
@@ -159,6 +227,82 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       }
     };
   }, []);
+
+  const startAudioRecording = (stream: MediaStream) => {
+    if (isRecordingAudio || !stream) {
+      console.log("⚠️ Already recording or no stream available");
+      return;
+    }
+    
+    try {
+      setIsRecordingAudio(true);
+      audioChunksRef.current = [];
+      
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      recorder.onstop = async () => {
+        console.log("🎵 Audio recording stopped, processing...");
+        
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          
+          // Convert to base64
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const base64Audio = reader.result as string;
+            
+            // Save to Firestore
+            const audioData = {
+              [`voiceRecording_${Date.now()}`]: {
+                audioData: base64Audio,
+                timestamp: new Date().toISOString(),
+                duration: 10,
+                studentId: user.id,
+                studentName: studentInfo.name
+              }
+            };
+            
+            try {
+              await updateDoc(sessionDocRef, audioData);
+              setAudioRecordingCount(prev => prev + 1);
+              console.log("✅ Audio recording saved to Firestore");
+            } catch (error) {
+              console.error("❌ Failed to save audio recording:", error);
+            }
+          };
+          
+          reader.readAsDataURL(audioBlob);
+        }
+        
+        setIsRecordingAudio(false);
+        setMediaRecorder(null);
+      };
+      
+      setMediaRecorder(recorder);
+      recorder.start();
+      
+      // Stop recording after 10 seconds
+      recordingTimeoutRef.current = setTimeout(() => {
+        if (recorder.state === 'recording') {
+          recorder.stop();
+        }
+      }, 10000);
+      
+      console.log("🔴 Started 10-second audio recording");
+      
+    } catch (error) {
+      console.error("❌ Failed to start audio recording:", error);
+      setIsRecordingAudio(false);
+    }
+  };
 
   // Function to manually restart camera
   const restartCamera = async () => {
@@ -269,6 +413,19 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     return () => {
       if (attendanceIntervalRef.current) {
         clearInterval(attendanceIntervalRef.current);
+      }
+      
+      // Stop audio monitoring
+      if (vadInstance) {
+        vadInstance.destroy();
+        setVadInstance(null);
+      }
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
       }
     };
   }, [isFinished, isLoading, questions.length, isCameraReady]);
@@ -1043,6 +1200,23 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         <div className="text-xs text-blue-400 mt-1">
           📸 Foto Absen: {attendancePhotoCount}
         </div>
+        <div className="text-xs text-purple-400 mt-1">
+          🎤 Human Voice: {audioRecordingCount}
+        </div>
+        <div className="text-xs text-gray-400 mt-1">
+          {vadInstance ? (
+            <span className="text-green-400">🔊 Audio Monitor: Active</span>
+          ) : vadError ? (
+            <span className="text-red-400">🔇 Audio: Error</span>
+          ) : (
+            <span className="text-yellow-400">🔊 Audio: Initializing</span>
+          )}
+        </div>
+        {isRecordingAudio && (
+          <div className="text-xs text-red-400 mt-1 animate-pulse">
+            🔴 Recording Audio...
+          </div>
+        )}
         {streamRef.current && (
           <div className="text-xs text-gray-400">
             Stream: {streamRef.current.active ? '🟢 Active' : '🔴 Inactive'}
@@ -1062,6 +1236,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               <div className="flex justify-center space-x-4 text-sm">
                 <div className="text-red-500">Pelanggaran: {violations}/3</div>
                 <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
+                <div className="text-purple-400">🎤 Human Voice: {audioRecordingCount}</div>
               </div>
             </div>
           </div>

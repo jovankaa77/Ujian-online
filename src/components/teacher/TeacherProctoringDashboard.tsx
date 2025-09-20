@@ -338,6 +338,11 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
                       Jumlah Pelanggaran: {session.violations}/3
                     </span>
                   </div>
+                  <div className="mt-2 flex justify-between items-center">
+                    <span className="text-sm text-purple-400">
+                      🎤 Human Voice: {Object.keys(session).filter(key => key.startsWith('voiceRecording_')).length}
+                    </span>
+                  </div>
                   {session.violations > 0 && (
                     <div className="mt-3 grid grid-cols-1 gap-1">
                       {session.violationSnapshot_1 && (
