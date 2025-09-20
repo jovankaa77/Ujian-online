@@ -395,6 +395,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         }
       });
       
+      // Increment the counter immediately after successful save
+      setAudioRecordingCount(prev => prev + 1);
+      
       setAudioStream(stream);
       
       // Initialize VAD with new stream
