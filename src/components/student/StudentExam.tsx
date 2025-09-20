@@ -112,9 +112,30 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                 startAudioRecording(stream);
               }
             }, 1000); // 1 second delay
+            
+            // Start recording after 1 second of continuous speech
+            speechDetectionTimeoutRef.current = setTimeout(() => {
+              if (speechStartTimeRef.current) {
+                console.log("🎤 1 second of speech detected, starting recording...");
+                startAudioRecording(stream);
+              }
+            }, 1000); // 1 second delay
           },
           onSpeechEnd: () => {
             console.log("🔇 Speech ended, stopping recording if active");
+            speechStartTimeRef.current = null;
+            
+            // Clear the detection timeout if speech ends before 1 second
+            if (speechDetectionTimeoutRef.current) {
+              clearTimeout(speechDetectionTimeoutRef.current);
+              speechDetectionTimeoutRef.current = null;
+            }
+            
+            // Stop recording if currently recording
+            if (isRecordingAudio && mediaRecorder && mediaRecorder.state === 'recording') {
+              console.log("🛑 Stopping recording due to speech end");
+              mediaRecorder.stop();
+            }
             speechStartTimeRef.current = null;
             
             // Clear the detection timeout if speech ends before 1 second
