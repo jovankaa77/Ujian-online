@@ -160,43 +160,44 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         // Convert to base64 and save
         const reader = new FileReader();
         reader.onloadend = async () => {
-          const fileName = `voice_${Date.now()}.webm`;
-          const filePath = `voice_recordings/${appState.exam.id}/${appState.sessionId}/${fileName}`;
-          
-          console.log("📤 Uploading audio to Firebase Storage...");
-          const storageRef = ref(storage, filePath);
-          const uploadResult = await uploadBytes(storageRef, audioBlob);
-          const downloadURL = await getDownloadURL(uploadResult.ref);
-          
-          console.log("✅ Audio uploaded successfully, saving to Firestore...");
-          
-          // Save recording info to Firestore
-          const sessionRef = doc(db, `artifacts/${appId}/public/data/exams/${appState.exam.id}/sessions`, appState.sessionId);
-          const recordingKey = `voiceRecording_${Date.now()}`;
-          
-          await updateDoc(sessionRef, {
-            [recordingKey]: {
-              audioURL: downloadURL,
-              fileName: fileName,
-              timestamp: new Date(),
-              duration: Math.round(duration / 1000),
-              studentId: user?.id || 'unknown',
-              studentName: studentInfo?.name || studentInfo?.fullName || user?.fullName || 'Unknown'
-            }
-          });
-          
-          // Increment counter AFTER successful save
-          setAudioRecordingCount(prev => {
-            const newCount = prev + 1;
-            console.log(`✅ Audio recording saved successfully! Count: ${newCount}`);
-            return newCount;
-          });
-          
-        } catch (error) {
-          console.error("❌ Failed to save audio recording:", error);
-        }
-        
-        setIsProcessingAudio(false);
+          try {
+            const fileName = `voice_${Date.now()}.webm`;
+            const filePath = `voice_recordings/${appState.exam.id}/${appState.sessionId}/${fileName}`;
+            
+            console.log("📤 Uploading audio to Firebase Storage...");
+            const storageRef = ref(storage, filePath);
+            const uploadResult = await uploadBytes(storageRef, audioBlob);
+            const downloadURL = await getDownloadURL(uploadResult.ref);
+            
+            console.log("✅ Audio uploaded successfully, saving to Firestore...");
+            
+            // Save recording info to Firestore
+            const sessionRef = doc(db, `artifacts/${appId}/public/data/exams/${appState.exam.id}/sessions`, appState.sessionId);
+            const recordingKey = `voiceRecording_${Date.now()}`;
+            
+            await updateDoc(sessionRef, {
+              [recordingKey]: {
+                audioURL: downloadURL,
+                fileName: fileName,
+                timestamp: new Date(),
+                duration: Math.round(duration / 1000),
+                studentId: user?.id || 'unknown',
+                studentName: studentInfo?.name || studentInfo?.fullName || user?.fullName || 'Unknown'
+              }
+            });
+            
+            // Increment counter AFTER successful save
+            setAudioRecordingCount(prev => {
+              const newCount = prev + 1;
+              console.log(`✅ Audio recording saved successfully! Count: ${newCount}`);
+              return newCount;
+            });
+            
+          } catch (error) {
+            console.error("❌ Failed to save audio recording:", error);
+          } finally {
+            setIsProcessingAudio(false);
+          }
       };
       
       reader.readAsDataURL(audioBlob);
