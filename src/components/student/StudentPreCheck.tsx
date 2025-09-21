@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
+import { faceDetectionService } from '../../utils/faceDetection';
 
 interface StudentPreCheckProps {
   navigateTo: (page: string, data?: any) => void;
@@ -14,13 +15,17 @@ interface DeviceChecks {
   camera: boolean | null;
   screenCount: boolean | null;
   microphone: boolean | null;
+  faceDetection: boolean | null;
 }
 
 const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateBack, appState, user }) => {
   const { studentInfo } = appState;
-  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null });
+  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null, faceDetection: null });
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<MediaStream | null>(null);
+  const [faceCount, setFaceCount] = useState(0);
+  const [maxFaceCount, setMaxFaceCount] = useState(0);
+  const faceDetectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Enhanced mobile detection
@@ -48,6 +53,21 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     
     if (isMobile) return;
     
+    // Load face detection model
+    const loadFaceDetection = async () => {
+      console.log("Loading face detection model...");
+      const loaded = await faceDetectionService.loadModel();
+      setChecks(c => ({ ...c, faceDetection: loaded }));
+      
+      if (loaded) {
+        console.log("Face detection model loaded successfully");
+      } else {
+        console.error("Failed to load face detection model");
+      }
+    };
+    
+    loadFaceDetection();
+    
     // Check camera and microphone permissions
     const checkMediaDevices = async () => {
       try {
@@ -71,6 +91,11 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           // Create video-only stream for display
           const videoStream = new MediaStream(videoTracks);
           videoRef.current.srcObject = videoStream;
+          
+          // Start face detection after video is loaded
+          videoRef.current.onloadedmetadata = () => {
+            startFaceDetection();
+          };
         }
         
         // Store audio stream reference for later use
@@ -98,9 +123,51 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     checkMediaDevices();
   }, []);
 
-  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone;
+  const startFaceDetection = () => {
+    if (!videoRef.current || !faceDetectionService.isModelLoaded()) return;
+    
+    // Clear existing interval
+    if (faceDetectionIntervalRef.current) {
+      clearInterval(faceDetectionIntervalRef.current);
+    }
+    
+    // Start face detection every 2 seconds
+    faceDetectionIntervalRef.current = setInterval(async () => {
+      if (videoRef.current && faceDetectionService.isModelLoaded()) {
+        try {
+          const detectedFaces = await faceDetectionService.detectFacesInVideo(videoRef.current);
+          setFaceCount(detectedFaces);
+          
+          // Track maximum face count
+          if (detectedFaces > maxFaceCount) {
+            setMaxFaceCount(detectedFaces);
+          }
+          
+          console.log(`Detected ${detectedFaces} faces`);
+        } catch (error) {
+          console.error("Face detection error:", error);
+        }
+      }
+    }, 2000);
+  };
+
+  // Cleanup face detection interval
+  useEffect(() => {
+    return () => {
+      if (faceDetectionIntervalRef.current) {
+        clearInterval(faceDetectionIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone && checks.faceDetection;
 
   const startExam = async () => {
+    // Stop face detection during exam start
+    if (faceDetectionIntervalRef.current) {
+      clearInterval(faceDetectionIntervalRef.current);
+    }
+    
     // Request fullscreen immediately on user interaction
     try {
       const elem = document.documentElement;
@@ -183,7 +250,8 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
       navigateTo('student_exam', { 
         sessionId: docRef.id, 
         exam: exam,
-        studentInfo: finalStudentInfo 
+        studentInfo: finalStudentInfo,
+        maxFaceCount: maxFaceCount
       });
     } catch (error) {
       console.error("Gagal memulai sesi ujian:", error);
@@ -226,7 +294,38 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           {renderCheckItem("Layar Tunggal", checks.screenCount)}
           {renderCheckItem("Akses Kamera", checks.camera)}
           {renderCheckItem("Akses Mikrofon", checks.microphone)}
+          {renderCheckItem("Model Deteksi Wajah", checks.faceDetection)}
         </ul>
+        
+        {/* Face Detection Status */}
+        {checks.camera && checks.faceDetection && (
+          <div className="mb-6 bg-blue-900 border border-blue-500 p-4 rounded-lg">
+            <h4 className="text-blue-300 font-bold mb-2">👤 Status Deteksi Wajah</h4>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-blue-200">Wajah Saat Ini:</span>
+                <span className={`ml-2 font-bold ${
+                  faceCount === 1 ? 'text-green-400' : 
+                  faceCount === 0 ? 'text-yellow-400' : 'text-red-400'
+                }`}>
+                  {faceCount} wajah
+                </span>
+              </div>
+              <div>
+                <span className="text-blue-200">Maksimal Terdeteksi:</span>
+                <span className={`ml-2 font-bold ${
+                  maxFaceCount === 1 ? 'text-green-400' : 
+                  maxFaceCount === 0 ? 'text-yellow-400' : 'text-red-400'
+                }`}>
+                  {maxFaceCount} wajah
+                </span>
+              </div>
+            </div>
+            <div className="mt-2 text-xs text-blue-200">
+              💡 <strong>Ideal:</strong> Sistem mendeteksi tepat 1 wajah untuk ujian yang aman
+            </div>
+          </div>
+        )}
         
         {checks.device === false && (
           <p className="text-red-400 text-center mb-4">
@@ -250,6 +349,23 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           <p className="text-red-400 text-center mb-4">
             ⚠️ Mohon izinkan akses mikrofon di browser Anda untuk monitoring audio, lalu segarkan halaman ini.
           </p>
+        )}
+        
+        {checks.faceDetection === false && (
+          <p className="text-red-400 text-center mb-4">
+            ⚠️ Gagal memuat model deteksi wajah. Silakan refresh halaman.
+          </p>
+        )}
+        
+        {faceDetectionService.isModelLoading() && (
+          <div className="mb-4 bg-yellow-900 border border-yellow-500 p-3 rounded-md">
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-yellow-400 mr-2"></div>
+              <p className="text-yellow-200 text-sm">
+                🤖 Memuat model deteksi wajah...
+              </p>
+            </div>
+          </div>
         )}
         
         <div className="my-4 w-full aspect-video bg-gray-900 rounded-md overflow-hidden">
@@ -290,6 +406,8 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
            checks.screenCount === false ? 'Gunakan Layar Tunggal' :
            checks.camera === false ? 'Izinkan Akses Kamera' :
            checks.microphone === false ? 'Izinkan Akses Mikrofon' :
+          checks.faceDetection === false ? 'Model Deteksi Wajah Gagal' :
+          faceDetectionService.isModelLoading() ? 'Memuat Model Deteksi Wajah...' :
            'Menunggu Pemeriksaan Selesai'}
         </button>
       </div>
