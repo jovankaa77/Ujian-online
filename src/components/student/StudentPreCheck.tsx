@@ -31,6 +31,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
   const audioRef = useRef<MediaStream | null>(null);
   const [isLoadingFaceModel, setIsLoadingFaceModel] = useState(false);
   const [faceModelStatus, setFaceModelStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [modelLoadProgress, setModelLoadProgress] = useState(0);
 
   useEffect(() => {
     // Enhanced mobile detection
@@ -62,9 +63,24 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     const loadFaceDetection = async () => {
       setIsLoadingFaceModel(true);
       setFaceModelStatus('loading');
+      setModelLoadProgress(0);
       
       try {
+        // Simulate loading progress
+        const progressInterval = setInterval(() => {
+          setModelLoadProgress(prev => {
+            if (prev >= 90) {
+              clearInterval(progressInterval);
+              return 90;
+            }
+            return prev + 10;
+          });
+        }, 200);
+        
         const loaded = await faceDetectionService.loadModel();
+        clearInterval(progressInterval);
+        setModelLoadProgress(100);
+        
         setChecks(c => ({ ...c, faceDetection: loaded }));
         setFaceModelStatus(loaded ? 'loaded' : 'error');
       } catch (error) {
@@ -267,6 +283,13 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
                 🤖 Memuat model deteksi wajah... Harap tunggu.
               </p>
             </div>
+                <div className="w-full bg-blue-800 rounded-full h-2 mt-2">
+                  <div 
+                    className="bg-blue-400 h-2 rounded-full transition-all duration-300" 
+                    style={{ width: `${modelLoadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-blue-400 text-xs mt-1">{modelLoadProgress}% dimuat</p>
           </div>
         )}
         

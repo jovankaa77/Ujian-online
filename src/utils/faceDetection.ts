@@ -19,7 +19,6 @@ export class FaceDetectionService {
     try {
       // Load MediaPipe Face Detection
       const { FaceDetection } = await import('@mediapipe/face_detection');
-      const { Camera } = await import('@mediapipe/camera_utils');
       
       this.model = new FaceDetection({
         locateFile: (file) => {
@@ -27,17 +26,38 @@ export class FaceDetectionService {
         }
       });
 
+      // Configure the model
+      this.model.setOptions({
+        model: 'short', // Use short-range model for better performance
+        minDetectionConfidence: 0.5,
+      });
+
+      // Wait for model to be ready
       await new Promise((resolve, reject) => {
-        this.model.setOptions({
-          model: 'short',
-          minDetectionConfidence: 0.5,
+        let isResolved = false;
+        
+        this.model.onResults((results: any) => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve(results);
+          }
         });
 
-        this.model.onResults(() => {
-          resolve(true);
-        });
+        // Initialize the model
+        this.model.initialize().then(() => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve(true);
+          }
+        }).catch(reject);
 
-        this.model.initialize().then(resolve).catch(reject);
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          if (!isResolved) {
+            isResolved = true;
+            reject(new Error('Model loading timeout'));
+          }
+        }, 10000);
       });
 
       this.isLoaded = true;
@@ -53,19 +73,32 @@ export class FaceDetectionService {
   }
 
   async detectFaces(imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement): Promise<number> {
-    if (!this.isLoaded) {
+    if (!this.isLoaded || !this.model) {
       console.warn('Face detection model not loaded');
       return 0;
     }
 
     try {
       return new Promise((resolve) => {
+        let isResolved = false;
+        
         this.model.onResults((results: any) => {
-          const faceCount = results.detections ? results.detections.length : 0;
-          resolve(faceCount);
+          if (!isResolved) {
+            isResolved = true;
+            const faceCount = results.detections ? results.detections.length : 0;
+            resolve(faceCount);
+          }
         });
 
         this.model.send({ image: imageElement });
+
+        // Timeout after 3 seconds
+        setTimeout(() => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve(0);
+          }
+        }, 3000);
       });
     } catch (error) {
       console.error('Error detecting faces:', error);

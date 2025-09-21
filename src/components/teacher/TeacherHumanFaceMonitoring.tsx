@@ -435,6 +435,9 @@ const TeacherHumanFaceMonitoring: React.FC<TeacherHumanFaceMonitoringProps> = ({
                       } text-white text-sm font-bold rounded-full`}>
                         👤 Max: {group.maxFaceCount}
                       </div>
+                      <div className="text-xs text-gray-200 mt-1">
+                        📸 {group.photos.length} foto
+                      </div>
                     </div>
                   </div>
                   
@@ -459,10 +462,10 @@ const TeacherHumanFaceMonitoring: React.FC<TeacherHumanFaceMonitoringProps> = ({
                       <p className="text-sm">Belum ada foto deteksi</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                    <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
                       {group.photos
                         .sort((a, b) => new Date(b.photo.timestamp).getTime() - new Date(a.photo.timestamp).getTime())
-                        .slice(0, 8) // Show max 8 photos
+                        .slice(0, 12) // Show max 12 photos
                         .map((item, index) => (
                         <div 
                           key={`${item.id}-${item.photoKey}`}
@@ -472,7 +475,7 @@ const TeacherHumanFaceMonitoring: React.FC<TeacherHumanFaceMonitoringProps> = ({
                           <img 
                             src={item.photo.imageData} 
                             alt={`Face Detection ${item.photo.faceCount}`}
-                            className="w-full h-20 object-cover rounded-md border-2 border-gray-600 group-hover:border-indigo-500 transition-colors"
+                            className="w-full h-16 object-cover rounded-md border-2 border-gray-600 group-hover:border-indigo-500 transition-colors"
                           />
                           <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-md transition-opacity"></div>
                           
@@ -484,7 +487,7 @@ const TeacherHumanFaceMonitoring: React.FC<TeacherHumanFaceMonitoringProps> = ({
                           </div>
                           
                           {/* Timestamp */}
-                          <div className="absolute bottom-1 left-1 bg-black bg-opacity-75 text-white px-1 py-0.5 rounded text-xs">
+                          <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-75 text-white px-1 py-0.5 text-xs text-center">
                             {new Date(item.photo.timestamp).toLocaleTimeString('id-ID', {
                               hour: '2-digit',
                               minute: '2-digit'
@@ -495,10 +498,10 @@ const TeacherHumanFaceMonitoring: React.FC<TeacherHumanFaceMonitoringProps> = ({
                     </div>
                   )}
                   
-                  {group.photos.length > 8 && (
+                  {group.photos.length > 12 && (
                     <div className="mt-2 text-center">
                       <span className="text-xs text-gray-400">
-                        +{group.photos.length - 8} foto lainnya
+                        +{group.photos.length - 12} foto lainnya
                       </span>
                     </div>
                   )}

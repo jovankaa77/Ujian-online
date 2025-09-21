@@ -32,6 +32,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
   const [maxFaceCount, setMaxFaceCount] = useState(0);
   const [isFaceDetectionActive, setIsFaceDetectionActive] = useState(true);
   const [lastFaceDetectionTime, setLastFaceDetectionTime] = useState<Date | null>(null);
+  const [previousFaceCount, setPreviousFaceCount] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,13 +46,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
   const isRecordingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const examStartTimeRef = useRef<Date>(new Date());
 
-  // Initialize camera and face detection
+  // Initialize camera and all monitoring features
   useEffect(() => {
+    examStartTimeRef.current = new Date();
+    
     const initializeCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
+          video: { width: 640, height: 480 }, 
           audio: true 
         });
         
@@ -59,26 +63,24 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
         
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => {
+            // Start all monitoring features after video is ready
+            startFaceDetection();
+            startAttendancePhotoCapture();
+            initializeAudioMonitoring(stream);
+          };
         }
-
-        // Initialize audio monitoring
-        initializeAudioMonitoring(stream);
-        
-        // Start face detection
-        startFaceDetection();
-        
-        // Start attendance photo capture
-        startAttendancePhotoCapture();
         
       } catch (error) {
         console.error('Failed to initialize camera:', error);
+        recordViolation('Camera Access Failed');
       }
     };
 
     initializeCamera();
 
     return () => {
-      // Cleanup
+      // Cleanup all monitoring
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -88,13 +90,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
       if (attendancePhotoIntervalRef.current) {
         clearInterval(attendancePhotoIntervalRef.current);
       }
-      if (audioContextRef.current) {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
       }
     };
   }, []);
 
-  // Face detection function
+  // Face detection function - only capture when face count changes
   const detectFaces = useCallback(async () => {
     if (!videoRef.current || !isFaceDetectionActive || !faceDetectionService.isModelLoaded()) {
       return;
@@ -110,15 +115,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
         setMaxFaceCount(detectedFaceCount);
       }
 
-      // Capture photo if faces detected
-      if (detectedFaceCount > 0) {
+      // Only capture photo when face count changes or when faces are detected for first time
+      if (detectedFaceCount !== previousFaceCount && detectedFaceCount > 0) {
         await captureFaceDetectionPhoto(detectedFaceCount);
+        setPreviousFaceCount(detectedFaceCount);
       }
 
     } catch (error) {
       console.error('Face detection error:', error);
     }
-  }, [isFaceDetectionActive, maxFaceCount]);
+  }, [isFaceDetectionActive, maxFaceCount, previousFaceCount]);
 
   // Start face detection
   const startFaceDetection = useCallback(() => {
@@ -166,35 +172,44 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
   // Refresh face detection
   const refreshFaceDetection = () => {
     setIsFaceDetectionActive(false);
+    setPreviousFaceCount(0);
     setTimeout(() => {
       setIsFaceDetectionActive(true);
       setFaceCount(0);
+      setMaxFaceCount(0);
       startFaceDetection();
     }, 1000);
   };
 
-  // Initialize audio monitoring
+  // Initialize audio monitoring for voice detection
   const initializeAudioMonitoring = async (stream: MediaStream) => {
     try {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
-      microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
       
-      analyserRef.current.fftSize = 256;
-      microphoneRef.current.connect(analyserRef.current);
-      
-      startVoiceDetection();
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
+        analyserRef.current.fftSize = 256;
+        microphoneRef.current.connect(analyserRef.current);
+        
+        startVoiceDetection();
+        console.log('✅ Audio monitoring initialized');
+      }
     } catch (error) {
       console.error('Failed to initialize audio monitoring:', error);
     }
   };
 
-  // Voice detection
+  // Voice detection with improved sensitivity
   const startVoiceDetection = () => {
     if (!analyserRef.current) return;
 
     const bufferLength = analyserRef.current.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
+    let consecutiveHighVolume = 0;
+    const VOLUME_THRESHOLD = 25; // Lowered threshold for better sensitivity
+    const CONSECUTIVE_FRAMES = 3; // Need 3 consecutive frames above threshold
 
     const detectVoice = () => {
       if (!analyserRef.current) return;
@@ -204,9 +219,15 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
       // Calculate average volume
       const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
       
-      // Voice threshold
-      if (average > 30 && !isRecordingRef.current) {
-        startVoiceRecording();
+      // Check for sustained voice activity
+      if (average > VOLUME_THRESHOLD) {
+        consecutiveHighVolume++;
+        if (consecutiveHighVolume >= CONSECUTIVE_FRAMES && !isRecordingRef.current) {
+          startVoiceRecording();
+          consecutiveHighVolume = 0; // Reset counter
+        }
+      } else {
+        consecutiveHighVolume = 0;
       }
       
       requestAnimationFrame(detectVoice);
@@ -224,7 +245,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
       recordedChunksRef.current = [];
 
       mediaRecorderRef.current = new MediaRecorder(mediaStreamRef.current, {
-        mimeType: 'audio/webm'
+        mimeType: 'audio/webm;codecs=opus'
       });
 
       mediaRecorderRef.current.ondataavailable = (event) => {
@@ -240,11 +261,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
       };
 
       mediaRecorderRef.current.start();
+      console.log('🎤 Voice recording started');
 
       // Stop recording after 5 seconds
       setTimeout(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
           mediaRecorderRef.current.stop();
+          console.log('🎤 Voice recording stopped');
         }
       }, 5000);
 
@@ -284,9 +307,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
     }
   };
 
-  // Attendance photo capture
+  // Attendance photo capture - scheduled photos
   const startAttendancePhotoCapture = () => {
-    const capturePhoto = async (label: string) => {
+    const captureAttendancePhoto = async (label: string) => {
       if (!videoRef.current || !canvasRef.current) return;
 
       const canvas = canvasRef.current;
@@ -321,7 +344,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
     // Schedule photos at specific intervals
     const schedulePhotoCapture = (minutes: number, label: string) => {
       setTimeout(() => {
-        capturePhoto(label);
+        captureAttendancePhoto(label);
       }, minutes * 60 * 1000);
     };
 
@@ -337,6 +360,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
     if (examDuration > 0) {
       schedulePhotoCapture(examDuration, 'Selesai');
     }
+
+    console.log('📅 Attendance photo schedule activated');
   };
 
   // Load questions
@@ -369,32 +394,52 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
     return () => clearInterval(interval);
   }, [exam.endTime]);
 
-  // Anti-cheat monitoring
+  // Enhanced anti-cheat monitoring
   useEffect(() => {
+    let isTabActive = true;
+    let isFullscreen = true;
+
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        recordViolation('Tab/Window Switch');
+      if (document.hidden && isTabActive) {
+        isTabActive = false;
+        recordViolation('Tab/Window Switch - Keluar dari tab ujian');
+      } else if (!document.hidden && !isTabActive) {
+        isTabActive = true;
       }
     };
 
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        recordViolation('Exited Fullscreen');
+      const isCurrentlyFullscreen = !!document.fullscreenElement;
+      if (!isCurrentlyFullscreen && isFullscreen) {
+        isFullscreen = false;
+        recordViolation('Exited Fullscreen - Keluar dari mode fullscreen');
+      } else if (isCurrentlyFullscreen && !isFullscreen) {
+        isFullscreen = true;
       }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Block common cheat keys
-      const blockedKeys = ['F12', 'F11', 'PrintScreen'];
+      // Enhanced blocked keys and combinations
+      const blockedKeys = ['F12', 'F11', 'PrintScreen', 'F5'];
       const blockedCombos = [
         { ctrl: true, shift: true, key: 'I' }, // Dev tools
         { ctrl: true, shift: true, key: 'J' }, // Console
+        { ctrl: true, shift: true, key: 'C' }, // Inspect element
         { ctrl: true, key: 'U' }, // View source
         { ctrl: true, key: 'A' }, // Select all
         { ctrl: true, key: 'C' }, // Copy
         { ctrl: true, key: 'V' }, // Paste
         { ctrl: true, key: 'X' }, // Cut
+        { ctrl: true, key: 'S' }, // Save
+        { ctrl: true, key: 'P' }, // Print
+        { ctrl: true, key: 'R' }, // Refresh
+        { ctrl: true, key: 'F' }, // Find
+        { ctrl: true, key: 'H' }, // History
         { alt: true, key: 'Tab' }, // Alt+Tab
+        { alt: true, key: 'F4' }, // Alt+F4
+        { key: 'F5' }, // Refresh
+        { ctrl: true, key: 'F5' }, // Hard refresh
+        { ctrl: true, shift: true, key: 'R' }, // Hard refresh
       ];
 
       if (blockedKeys.includes(e.key) || 
@@ -405,25 +450,112 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
             e.key === combo.key
           )) {
         e.preventDefault();
-        recordViolation('Blocked Key Combination');
+        e.stopPropagation();
+        recordViolation(`Blocked Key: ${e.key}${e.ctrlKey ? '+Ctrl' : ''}${e.shiftKey ? '+Shift' : ''}${e.altKey ? '+Alt' : ''}`);
       }
     };
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      recordViolation('Right Click Attempt');
+      recordViolation('Right Click Attempt - Mencoba klik kanan');
     };
 
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      recordViolation('Copy Attempt - Mencoba copy text');
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      recordViolation('Paste Attempt - Mencoba paste text');
+    };
+
+    const handleCut = (e: ClipboardEvent) => {
+      e.preventDefault();
+      recordViolation('Cut Attempt - Mencoba cut text');
+    };
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      recordViolation('Page Unload Attempt - Mencoba keluar dari halaman');
+      return 'Anda yakin ingin keluar dari ujian?';
+    };
+
+    const handleResize = () => {
+      // Detect screen resolution changes (possible dual monitor setup)
+      const currentWidth = window.screen.width;
+      const currentHeight = window.screen.height;
+      
+      // Store initial screen size
+      if (!window.initialScreenSize) {
+        window.initialScreenSize = { width: currentWidth, height: currentHeight };
+      } else {
+        // Check if screen size changed significantly
+        const widthDiff = Math.abs(currentWidth - window.initialScreenSize.width);
+        const heightDiff = Math.abs(currentHeight - window.initialScreenSize.height);
+        
+        if (widthDiff > 100 || heightDiff > 100) {
+          recordViolation('Screen Resolution Change - Perubahan resolusi layar terdeteksi');
+        }
+      }
+    };
+
+    // Add all event listeners
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
     document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('copy', handleCopy);
+    document.addEventListener('paste', handlePaste);
+    document.addEventListener('cut', handleCut);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('resize', handleResize);
+
+    // Disable text selection
+    document.body.style.userSelect = 'none';
+    document.body.style.webkitUserSelect = 'none';
+
+    // Disable drag and drop
+    const handleDragStart = (e: DragEvent) => {
+      e.preventDefault();
+      recordViolation('Drag Attempt - Mencoba drag konten');
+    };
+    document.addEventListener('dragstart', handleDragStart);
+
+    // Monitor for developer tools
+    let devtools = { open: false, orientation: null };
+    const threshold = 160;
+
+    const detectDevTools = () => {
+      if (window.outerHeight - window.innerHeight > threshold || 
+          window.outerWidth - window.innerWidth > threshold) {
+        if (!devtools.open) {
+          devtools.open = true;
+          recordViolation('Developer Tools Opened - Membuka developer tools');
+        }
+      } else {
+        devtools.open = false;
+      }
+    };
+
+    const devToolsInterval = setInterval(detectDevTools, 1000);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('copy', handleCopy);
+      document.removeEventListener('paste', handlePaste);
+      document.removeEventListener('cut', handleCut);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('dragstart', handleDragStart);
+      clearInterval(devToolsInterval);
+      
+      // Restore text selection
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
     };
   }, []);
 
@@ -468,7 +600,18 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
       });
       
       alert('Anda telah didiskualifikasi karena terlalu banyak pelanggaran.');
+      
+      // Exit fullscreen before navigation
+      if (document.fullscreenElement) {
+        try {
+          await document.exitFullscreen();
+        } catch (error) {
+          console.warn('Failed to exit fullscreen:', error);
+        }
+      }
+      
       navigateTo('student_dashboard', { currentUser: user, clearHistory: true });
+      return;
     }
     
     setTimeout(() => setShowWarning(false), 5000);
@@ -523,7 +666,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
       
       // Exit fullscreen
       if (document.fullscreenElement) {
-        document.exitFullscreen();
+        try {
+          await document.exitFullscreen();
+        } catch (error) {
+          console.warn('Failed to exit fullscreen:', error);
+        }
+      }
+      
+      // Stop all media streams
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
       }
       
       navigateTo('student_dashboard', { currentUser: user, clearHistory: true });
@@ -740,6 +892,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
               )}
             </div>
             
+            {/* Recording indicator */}
+            {isRecordingRef.current && (
+              <div className="absolute top-2 right-2 bg-red-600 text-white px-2 py-1 rounded text-xs animate-pulse">
+                🎤 REC
+              </div>
+            )}
+            
             {lastFaceDetectionTime && (
               <div className="absolute bottom-2 left-2 bg-black bg-opacity-75 text-white px-2 py-1 rounded text-xs">
                 {lastFaceDetectionTime.toLocaleTimeString()}
@@ -752,6 +911,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ navigateTo, navigateBack, app
             <p>• Jangan keluar dari fullscreen</p>
             <p>• Hindari aktivitas mencurigakan</p>
             <p>• Max wajah terdeteksi: {maxFaceCount}</p>
+            <p>• 🎤 Voice monitoring: Aktif</p>
+            <p>• 📸 Auto attendance: Aktif</p>
           </div>
         </div>
       </div>
