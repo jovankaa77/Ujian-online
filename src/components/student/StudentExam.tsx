@@ -103,8 +103,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         const vad = await (window as any).vad.MicVAD.new({
           stream: stream,
           onSpeechStart: () => {
-            if (audioRecordingCount >= 8) {
-              console.log("🎤 Max recordings reached (8), ignoring speech");
+            if (audioRecordingCount >= 10) {
+              console.log("🎤 Max recordings reached (10), ignoring speech");
             } else {
               speechStartTimeRef.current = Date.now();
             
@@ -254,8 +254,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   }, []);
 
   const startAudioRecording = (stream: MediaStream) => {
-    if (isRecordingAudio || !stream || audioRecordingCount >= 8) {
-      console.log("⚠️ Already recording, no stream available, or max recordings reached (8)");
+    if (isRecordingAudio || !stream || audioRecordingCount >= 10) {
+      console.log("⚠️ Already recording, no stream available, or max recordings reached (10)");
       return;
     }
     
@@ -1275,7 +1275,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           📸 Foto Absen: {attendancePhotoCount}
         </div>
         <div className="text-xs text-purple-400 mb-2">
-          🎤 Human Voice: {audioRecordingCount}/8
+          🎤 Human Voice: {audioRecordingCount}/10
         </div>
         
         {isRecordingAudio && (
@@ -1330,7 +1330,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               <div className="flex justify-center space-x-4 text-sm">
                 <div className="text-red-500">Pelanggaran: {violations}/3</div>
                 <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
-                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}/8</div>
+                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}/10</div>
               </div>
             </div>
           </div>
