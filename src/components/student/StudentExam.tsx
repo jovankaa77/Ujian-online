@@ -103,8 +103,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         const vad = await (window as any).vad.MicVAD.new({
           stream: stream,
           onSpeechStart: () => {
-            console.log("🎤 Speech start detected");
-            speechStartTimeRef.current = Date.now();
+            if (audioRecordingCount >= 8) {
+              console.log("🎤 Max recordings reached (8), ignoring speech");
             
             // Start recording after 1 second of continuous speech
             speechDetectionTimeoutRef.current = setTimeout(() => {
@@ -251,8 +251,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   }, []);
 
   const startAudioRecording = (stream: MediaStream) => {
-    if (isRecordingAudio || !stream || audioRecordingCount >= 25) {
-      console.log("⚠️ Already recording, no stream available, or max recordings reached (25)");
+    if (isRecordingAudio || !stream || audioRecordingCount >= 8) {
+      console.log("⚠️ Already recording, no stream available, or max recordings reached (8)");
       return;
     }
     
@@ -286,7 +286,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               [`voiceRecording_${Date.now()}`]: {
                 audioData: base64Audio,
                 timestamp: new Date().toISOString(),
-                duration: 10,
+                duration: 4,
                 studentId: user.id,
                 studentName: studentInfo.name
               }
@@ -311,14 +311,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       setMediaRecorder(recorder);
       recorder.start();
       
-      // Stop recording after 10 seconds
+      // Stop recording after 4 seconds
       recordingTimeoutRef.current = setTimeout(() => {
         if (recorder.state === 'recording') {
           recorder.stop();
         }
-      }, 10000);
+      }, 4000);
       
-      console.log("🔴 Started 10-second audio recording");
+      console.log("🔴 Started 4-second audio recording");
       
     } catch (error) {
       console.error("❌ Failed to start audio recording:", error);
@@ -1272,12 +1272,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           📸 Foto Absen: {attendancePhotoCount}
         </div>
         <div className="text-xs text-purple-400 mb-2">
-          🎤 Human Voice: {audioRecordingCount}
+          🎤 Human Voice: {audioRecordingCount}/8
         </div>
         
         {isRecordingAudio && (
           <div className="text-xs text-red-400 mb-2 animate-pulse">
-            🔴 Recording Audio...
+            🔴 Recording Audio... (4s)
           </div>
         )}
         
@@ -1327,7 +1327,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               <div className="flex justify-center space-x-4 text-sm">
                 <div className="text-red-500">Pelanggaran: {violations}/3</div>
                 <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
-                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}</div>
+                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}/8</div>
               </div>
             </div>
           </div>
