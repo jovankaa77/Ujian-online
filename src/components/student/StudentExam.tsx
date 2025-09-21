@@ -105,14 +105,17 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           onSpeechStart: () => {
             if (audioRecordingCount >= 8) {
               console.log("🎤 Max recordings reached (8), ignoring speech");
+            } else {
+              speechStartTimeRef.current = Date.now();
             
-            // Start recording after 1 second of continuous speech
-            speechDetectionTimeoutRef.current = setTimeout(() => {
-              if (speechStartTimeRef.current) {
-                console.log("🎤 1 second of speech detected, starting recording...");
-                startAudioRecording(stream);
-              }
-            }, 1000); // 1 second delay
+              // Start recording after 1 second of continuous speech
+              speechDetectionTimeoutRef.current = setTimeout(() => {
+                if (speechStartTimeRef.current) {
+                  console.log("🎤 1 second of speech detected, starting recording...");
+                  startAudioRecording(stream);
+                }
+              }, 1000); // 1 second delay
+            }
           },
           onSpeechEnd: () => {
             console.log("🔇 Speech ended, stopping recording if active");
@@ -436,7 +439,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             console.log("📷 Camera restarted successfully:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
             setIsCameraReady(true);
           } else {
-            studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown'
+            setTimeout(checkVideoReady, 100);
           }
         };
         
