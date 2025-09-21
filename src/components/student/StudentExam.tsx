@@ -104,6 +104,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           stream: stream,
           onSpeechStart: () => {
             console.log("🎤 Speech start detected");
+            
+            // Check if we've reached maximum recordings before starting detection
+            if (audioRecordingCount >= 25) {
+              console.log("⚠️ Maximum recordings reached, ignoring speech detection");
+              return;
+            }
+            
             speechStartTimeRef.current = Date.now();
             
             // Start recording after 1 second of continuous speech
@@ -251,8 +258,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   }, []);
 
   const startAudioRecording = (stream: MediaStream) => {
-    if (isRecordingAudio || !stream || audioRecordingCount >= 25) {
-      console.log("⚠️ Already recording, no stream available, or max recordings reached (25)");
+    if (isRecordingAudio || !stream) {
+      console.log("⚠️ Already recording or no stream available");
+      return;
+    }
+    
+    // Check if we've reached the maximum recordings
+    if (audioRecordingCount >= 25) {
+      console.log("⚠️ Maximum recordings reached (25/25)");
       return;
     }
     
@@ -281,21 +294,28 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           reader.onloadend = async () => {
             const base64Audio = reader.result as string;
             
+            // Generate unique timestamp-based key
+            const recordingKey = `voiceRecording_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
             // Save to Firestore
             const audioData = {
-              [`voiceRecording_${Date.now()}`]: {
+              [recordingKey]: {
                 audioData: base64Audio,
                 timestamp: new Date().toISOString(),
                 duration: 10,
                 studentId: user.id,
-                studentName: studentInfo.name
+                studentName: studentInfo.name || studentInfo.fullName || user.fullName || 'Unknown',
+                recordingNumber: audioRecordingCount + 1
               }
             };
             
             try {
               await updateDoc(sessionDocRef, audioData);
-              setAudioRecordingCount(prev => prev + 1);
-              console.log("✅ Audio recording saved to Firestore");
+              setAudioRecordingCount(prev => {
+                const newCount = prev + 1;
+                console.log(`✅ Audio recording ${newCount}/25 saved to Firestore`);
+                return newCount;
+              });
             } catch (error) {
               console.error("❌ Failed to save audio recording:", error);
             }
@@ -314,11 +334,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       // Stop recording after 10 seconds
       recordingTimeoutRef.current = setTimeout(() => {
         if (recorder.state === 'recording') {
+          console.log("⏰ 10 seconds reached, stopping recording...");
           recorder.stop();
         }
       }, 10000);
       
-      console.log("🔴 Started 10-second audio recording");
+      console.log(`🔴 Started 10-second audio recording (${audioRecordingCount + 1}/25)`);
       
     } catch (error) {
       console.error("❌ Failed to start audio recording:", error);
@@ -376,6 +397,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         stream: stream,
         onSpeechStart: () => {
           console.log("🎤 Speech detected, starting recording...");
+          
+          // Check if we've reached maximum recordings
+          if (audioRecordingCount >= 25) {
+            console.log("⚠️ Maximum recordings reached, ignoring speech detection");
+            return;
+          }
+          
           startAudioRecording(stream);
         },
         onSpeechEnd: () => {
@@ -1272,12 +1300,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           📸 Foto Absen: {attendancePhotoCount}
         </div>
         <div className="text-xs text-purple-400 mb-2">
-          🎤 Human Voice: {audioRecordingCount}
+          🎤 Human Voice: {audioRecordingCount}/25
         </div>
         
         {isRecordingAudio && (
           <div className="text-xs text-red-400 mb-2 animate-pulse">
-            🔴 Recording Audio...
+            🔴 Recording Audio... ({audioRecordingCount + 1}/25)
           </div>
         )}
         
@@ -1327,7 +1355,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               <div className="flex justify-center space-x-4 text-sm">
                 <div className="text-red-500">Pelanggaran: {violations}/3</div>
                 <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
-                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}</div>
+                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}/25</div>
               </div>
             </div>
           </div>
