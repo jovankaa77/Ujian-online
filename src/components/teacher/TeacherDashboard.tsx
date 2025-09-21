@@ -9,6 +9,7 @@ import TeacherProctoringDashboard from './TeacherProctoringDashboard';
 import QuestionManager from './QuestionManager';
 import TeacherAttendanceRecap from './TeacherAttendanceRecap';
 import TeacherVoiceMonitoring from './TeacherVoiceMonitoring';
+import TeacherHumanFaceMonitoring from './TeacherHumanFaceMonitoring';
 
 interface TeacherDashboardProps {
   user?: any;
@@ -19,7 +20,7 @@ interface TeacherDashboardProps {
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, navigateBack, canGoBack }) => {
   const [view, setView] = useState('search');
-  const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap' | 'voice_monitoring'>('main');
+  const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap' | 'voice_monitoring' | 'human_face_monitoring'>('main');
   const [searchCode, setSearchCode] = useState('');
   const [foundExam, setFoundExam] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -95,6 +96,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
         break;
       case 'voice_monitoring':
         setCurrentView('voice_monitoring');
+        break;
+      case 'human_face_monitoring':
+        setCurrentView('human_face_monitoring');
         break;
       default:
         navigateTo(page, data);
@@ -230,6 +234,16 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
   if (currentView === 'voice_monitoring') {
     return (
       <TeacherVoiceMonitoring 
+        navigateTo={navigateTo}
+        navigateBack={handleBackToMain}
+        appState={{ exam: currentExam }}
+      />
+    );
+  }
+
+  if (currentView === 'human_face_monitoring') {
+    return (
+      <TeacherHumanFaceMonitoring 
         navigateTo={navigateTo}
         navigateBack={handleBackToMain}
         appState={{ exam: currentExam }}
@@ -404,6 +418,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                   className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
                 >
                   Human Voice
+                </button>
+                <button 
+                  onClick={() => handleNavigateToFeature('human_face_monitoring', { exam: foundExam })} 
+                  className="bg-pink-600 hover:bg-pink-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
+                >
+                  Human Face
                 </button>
               </div>
             </div>

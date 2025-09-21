@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
+import { faceDetectionService } from '../../utils/faceDetection';
 
 interface StudentPreCheckProps {
   navigateTo: (page: string, data?: any) => void;
@@ -14,13 +15,22 @@ interface DeviceChecks {
   camera: boolean | null;
   screenCount: boolean | null;
   microphone: boolean | null;
+  faceDetection: boolean | null;
 }
 
 const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateBack, appState, user }) => {
   const { studentInfo } = appState;
-  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null });
+  const [checks, setChecks] = useState<DeviceChecks>({ 
+    device: null, 
+    camera: null, 
+    screenCount: null, 
+    microphone: null,
+    faceDetection: null 
+  });
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<MediaStream | null>(null);
+  const [isLoadingFaceModel, setIsLoadingFaceModel] = useState(false);
+  const [faceModelStatus, setFaceModelStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
   useEffect(() => {
     // Enhanced mobile detection
@@ -47,6 +57,24 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     checkScreens();
     
     if (isMobile) return;
+    
+    // Load face detection model
+    const loadFaceDetection = async () => {
+      setIsLoadingFaceModel(true);
+      setFaceModelStatus('loading');
+      
+      try {
+        const loaded = await faceDetectionService.loadModel();
+        setChecks(c => ({ ...c, faceDetection: loaded }));
+        setFaceModelStatus(loaded ? 'loaded' : 'error');
+      } catch (error) {
+        console.error('Failed to load face detection:', error);
+        setChecks(c => ({ ...c, faceDetection: false }));
+        setFaceModelStatus('error');
+      } finally {
+        setIsLoadingFaceModel(false);
+      }
+    };
     
     // Check camera and microphone permissions
     const checkMediaDevices = async () => {
@@ -95,10 +123,11 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
       }
     };
     
+    loadFaceDetection();
     checkMediaDevices();
   }, []);
 
-  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone;
+  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone && checks.faceDetection;
 
   const startExam = async () => {
     // Request fullscreen immediately on user interaction
@@ -226,7 +255,28 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           {renderCheckItem("Layar Tunggal", checks.screenCount)}
           {renderCheckItem("Akses Kamera", checks.camera)}
           {renderCheckItem("Akses Mikrofon", checks.microphone)}
+          {renderCheckItem("Model Deteksi Wajah", checks.faceDetection)}
         </ul>
+        
+        {/* Face Detection Model Status */}
+        {faceModelStatus === 'loading' && (
+          <div className="mb-4 p-3 bg-blue-900 border border-blue-500 rounded-md">
+            <div className="flex items-center">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400 mr-3"></div>
+              <p className="text-blue-300 text-sm">
+                🤖 Memuat model deteksi wajah... Harap tunggu.
+              </p>
+            </div>
+          </div>
+        )}
+        
+        {faceModelStatus === 'error' && (
+          <div className="mb-4 p-3 bg-red-900 border border-red-500 rounded-md">
+            <p className="text-red-300 text-sm">
+              ❌ <strong>Gagal memuat model deteksi wajah.</strong> Refresh halaman untuk mencoba lagi.
+            </p>
+          </div>
+        )}
         
         {checks.device === false && (
           <p className="text-red-400 text-center mb-4">
@@ -265,13 +315,13 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         {checks.device && (
           <div className="mb-4 p-3 bg-blue-900 border border-blue-500 rounded-md">
             <p className="text-blue-300 text-sm">
-              ℹ️ <strong>Penting:</strong> Ujian akan otomatis masuk mode fullscreen dan mengaktifkan monitoring audio. 
-              Keluar dari fullscreen atau aktivitas suara akan direkam sebagai bukti pengawasan.
+              ℹ️ <strong>Penting:</strong> Ujian akan otomatis masuk mode fullscreen dan mengaktifkan monitoring audio serta deteksi wajah. 
+              Keluar dari fullscreen, aktivitas suara, atau deteksi multiple wajah akan direkam sebagai bukti pengawasan.
             </p>
           </div>
         )}
         
-        {checks.device && checks.camera && checks.screenCount && !checks.microphone && (
+        {checks.device && checks.camera && checks.screenCount && checks.faceDetection && !checks.microphone && (
           <div className="mb-4 p-3 bg-red-900 border border-red-500 rounded-md">
             <p className="text-red-300 text-sm">
               🚫 <strong>Akses Mikrofon Diperlukan:</strong> Sistem memerlukan akses mikrofon untuk monitoring audio selama ujian. 
@@ -285,11 +335,13 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           disabled={!allChecksPassed} 
           className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed"
         >
-          {allChecksPassed ? 'Mulai Ujian' : 
+          {isLoadingFaceModel ? 'Memuat Model Deteksi Wajah...' :
+           allChecksPassed ? 'Mulai Ujian' : 
            checks.device === false ? 'Gunakan Desktop/Laptop' :
            checks.screenCount === false ? 'Gunakan Layar Tunggal' :
            checks.camera === false ? 'Izinkan Akses Kamera' :
            checks.microphone === false ? 'Izinkan Akses Mikrofon' :
+           checks.faceDetection === false ? 'Model Deteksi Wajah Gagal' :
            'Menunggu Pemeriksaan Selesai'}
         </button>
       </div>
