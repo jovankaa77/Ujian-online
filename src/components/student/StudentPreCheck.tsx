@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
@@ -19,8 +19,12 @@ interface DeviceChecks {
 const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateBack, appState, user }) => {
   const { studentInfo } = appState;
   const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null });
+  const [isMonitoring, setIsMonitoring] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<MediaStream | null>(null);
+  const monitoringIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentStreamRef = useRef<MediaStream | null>(null);
+  const permissionCheckRef = useRef<boolean>(false);
 
   useEffect(() => {
     // Enhanced mobile detection
@@ -28,6 +32,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
                      (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
                      window.screen.width < 1024;
     
+    setChecks(c => ({ ...c, device: !isMobile }));
     // Check screen count
     const checkScreens = async () => {
       try {
@@ -43,7 +48,6 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
       }
     };
     
-    setChecks(c => ({ ...c, device: !isMobile }));
     checkScreens();
     
     if (isMobile) return;
@@ -51,6 +55,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     // Check camera and microphone permissions
     const checkMediaDevices = async () => {
       try {
+        permissionCheckRef.current = true;
         // Request both video and audio permissions
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: true, 
@@ -70,12 +75,18 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         if (videoRef.current && videoTracks.length > 0) {
           // Create video-only stream for display
           const videoStream = new MediaStream(videoTracks);
+          currentStreamRef.current = stream;
           videoRef.current.srcObject = videoStream;
         }
         
         // Store audio stream reference for later use
         if (audioTracks.length > 0) {
           audioRef.current = new MediaStream(audioTracks);
+        }
+
+        // Start continuous monitoring after initial success
+        if (videoTracks.length > 0 && audioTracks.length > 0) {
+          startContinuousMonitoring();
         }
         
       } catch (err) {
@@ -87,6 +98,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
           setChecks(c => ({ ...c, camera: true, microphone: false }));
           if (videoRef.current) {
+            currentStreamRef.current = videoStream;
             videoRef.current.srcObject = videoStream;
           }
         } catch (videoErr) {
@@ -98,9 +110,140 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     checkMediaDevices();
   }, []);
 
+  // Continuous monitoring function
+  const startContinuousMonitoring = useCallback(() => {
+    if (isMonitoring) return;
+    
+    setIsMonitoring(true);
+    
+    const monitorDevices = async () => {
+      try {
+        // Check if current stream is still active
+        if (currentStreamRef.current) {
+          const videoTracks = currentStreamRef.current.getVideoTracks();
+          const audioTracks = currentStreamRef.current.getAudioTracks();
+          
+          const cameraActive = videoTracks.length > 0 && videoTracks[0].readyState === 'live';
+          const microphoneActive = audioTracks.length > 0 && audioTracks[0].readyState === 'live';
+          
+          // Update checks based on track status
+          setChecks(prevChecks => ({
+            ...prevChecks,
+            camera: cameraActive,
+            microphone: microphoneActive
+          }));
+          
+          // If any track is ended, try to get new permissions
+          if (!cameraActive || !microphoneActive) {
+            console.warn("Media tracks ended, attempting to reacquire...");
+            await recheckMediaPermissions();
+          }
+        } else {
+          // No current stream, recheck permissions
+          await recheckMediaPermissions();
+        }
+        
+        // Check screen count changes
+        await recheckScreenCount();
+        
+        // Check if still on desktop (window size changes)
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                         (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
+                         window.screen.width < 1024;
+        
+        setChecks(prevChecks => ({
+          ...prevChecks,
+          device: !isMobile
+        }));
+        
+      } catch (error) {
+        console.error("Error in continuous monitoring:", error);
+        // Set all checks to false on error
+        setChecks(prevChecks => ({
+          ...prevChecks,
+          camera: false,
+          microphone: false
+        }));
+      }
+    };
+    
+    // Run monitoring every 2 seconds
+    monitoringIntervalRef.current = setInterval(monitorDevices, 2000);
+  }, [isMonitoring]);
+
+  // Recheck media permissions
+  const recheckMediaPermissions = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: true, 
+        audio: true 
+      });
+      
+      const videoTracks = stream.getVideoTracks();
+      const audioTracks = stream.getAudioTracks();
+      
+      setChecks(prevChecks => ({ 
+        ...prevChecks, 
+        camera: videoTracks.length > 0,
+        microphone: audioTracks.length > 0
+      }));
+      
+      // Update video display
+      if (videoRef.current && videoTracks.length > 0) {
+        const videoStream = new MediaStream(videoTracks);
+        videoRef.current.srcObject = videoStream;
+      }
+      
+      // Update stream references
+      currentStreamRef.current = stream;
+      if (audioTracks.length > 0) {
+        audioRef.current = new MediaStream(audioTracks);
+      }
+      
+    } catch (error) {
+      console.error("Failed to recheck media permissions:", error);
+      setChecks(prevChecks => ({
+        ...prevChecks,
+        camera: false,
+        microphone: false
+      }));
+    }
+  };
+
+  // Recheck screen count
+  const recheckScreenCount = async () => {
+    try {
+      if ('getScreenDetails' in window) {
+        const screenDetails = await (window as any).getScreenDetails();
+        setChecks(prevChecks => ({ ...prevChecks, screenCount: screenDetails.screens.length === 1 }));
+      }
+    } catch {
+      // Fallback: assume single screen if API not available
+      setChecks(prevChecks => ({ ...prevChecks, screenCount: true }));
+    }
+  };
+
   const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone;
 
+  // Cleanup function
+  useEffect(() => {
+    return () => {
+      if (monitoringIntervalRef.current) {
+        clearInterval(monitoringIntervalRef.current);
+      }
+      if (currentStreamRef.current) {
+        currentStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
   const startExam = async () => {
+    // Final check before starting exam
+    if (!allChecksPassed) {
+      alert("Semua pemeriksaan perangkat harus berhasil sebelum memulai ujian.");
+      return;
+    }
+
     // Request fullscreen immediately on user interaction
     try {
       const elem = document.documentElement;
@@ -194,21 +337,53 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
   const renderCheckItem = (label: string, status: boolean | null) => {
     let statusText = "Memeriksa...";
     let colorClass = "text-yellow-400";
-    
+    let icon = "⏳";
     if (status === true) {
       statusText = "OK";
       colorClass = "text-green-400";
+      icon = "✅";
     } else if (status === false) {
       statusText = "Gagal/Ditolak";
       colorClass = "text-red-400";
+      icon = "❌";
     }
     
     return (
       <li className="flex justify-between items-center p-3 bg-gray-700 rounded-md">
-        <span>{label}</span>
-        <span className={`font-bold ${colorClass}`}>{statusText}</span>
+        <span className="flex items-center">
+          <span className="mr-2">{icon}</span>
+          {label}
+        </span>
+        <span className={`font-bold ${colorClass}`}>
+          {statusText}
+          {isMonitoring && status !== null && (
+            <span className="ml-2 text-xs text-blue-400">(Live)</span>
+          )}
+        </span>
       </li>
     );
+  };
+
+  // Manual refresh function
+  const handleManualRefresh = async () => {
+    setChecks({ device: null, camera: null, screenCount: null, microphone: null });
+    
+    // Stop current monitoring
+    if (monitoringIntervalRef.current) {
+      clearInterval(monitoringIntervalRef.current);
+      setIsMonitoring(false);
+    }
+    
+    // Stop current streams
+    if (currentStreamRef.current) {
+      currentStreamRef.current.getTracks().forEach(track => track.stop());
+      currentStreamRef.current = null;
+    }
+    
+    // Restart checks
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
   };
 
   return (
@@ -221,12 +396,32 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
       </button>
       <h2 className="text-3xl font-bold mb-6 text-center">Pemeriksaan Perangkat</h2>
       <div className="w-full max-w-lg mx-auto bg-gray-800 p-8 rounded-lg shadow-xl">
+        {/* Real-time monitoring indicator */}
+        {isMonitoring && (
+          <div className="mb-4 bg-blue-900 border border-blue-500 p-3 rounded-md">
+            <div className="flex items-center justify-center">
+              <div className="animate-pulse w-3 h-3 bg-blue-400 rounded-full mr-2"></div>
+              <span className="text-blue-300 text-sm font-bold">🔄 Monitoring Real-time Aktif</span>
+            </div>
+          </div>
+        )}
+        
         <ul className="space-y-3 mb-6">
           {renderCheckItem("Akses dari Desktop", checks.device)}
           {renderCheckItem("Layar Tunggal", checks.screenCount)}
           {renderCheckItem("Akses Kamera", checks.camera)}
           {renderCheckItem("Akses Mikrofon", checks.microphone)}
         </ul>
+        
+        {/* Manual refresh button */}
+        <div className="mb-6 text-center">
+          <button
+            onClick={handleManualRefresh}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-sm"
+          >
+            🔄 Refresh Pemeriksaan
+          </button>
+        </div>
         
         {checks.device === false && (
           <p className="text-red-400 text-center mb-4">
@@ -252,13 +447,37 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           </p>
         )}
         
+        {/* Warning for failed checks after initial success */}
+        {permissionCheckRef.current && (!checks.camera || !checks.microphone) && (
+          <div className="mb-4 p-3 bg-red-900 border border-red-500 rounded-md">
+            <p className="text-red-300 text-sm text-center">
+              ⚠️ <strong>Peringatan:</strong> Akses kamera atau mikrofon telah dinonaktifkan. 
+              Silakan aktifkan kembali di pengaturan browser Anda dan klik "Refresh Pemeriksaan".
+            </p>
+          </div>
+        )}
+        
+        {/* Camera preview */}
         <div className="my-4 w-full aspect-video bg-gray-900 rounded-md overflow-hidden">
+          {checks.camera === false && (
+            <div className="w-full h-full flex items-center justify-center bg-red-900">
+              <div className="text-center p-4">
+                <div className="text-red-400 mb-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728" />
+                  </svg>
+                </div>
+                <p className="text-red-300 text-sm font-bold">Kamera Tidak Aktif</p>
+                <p className="text-red-400 text-xs">Izinkan akses kamera</p>
+              </div>
+            </div>
+          )}
           <video 
             ref={videoRef} 
             autoPlay 
             playsInline 
             muted 
-            className="w-full h-full object-cover"
+            className={`w-full h-full object-cover ${checks.camera === false ? 'hidden' : ''}`}
           />
         </div>
         
@@ -266,7 +485,8 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           <div className="mb-4 p-3 bg-blue-900 border border-blue-500 rounded-md">
             <p className="text-blue-300 text-sm">
               ℹ️ <strong>Penting:</strong> Ujian akan otomatis masuk mode fullscreen dan mengaktifkan monitoring audio. 
-              Keluar dari fullscreen atau aktivitas suara akan direkam sebagai bukti pengawasan.
+              Keluar dari fullscreen atau aktivitas suara akan direkam sebagai bukti pengawasan. 
+              Sistem akan terus memantau perangkat Anda selama ujian.
             </p>
           </div>
         )}
@@ -280,10 +500,24 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           </div>
         )}
         
+        {/* Dynamic status messages */}
+        {!allChecksPassed && permissionCheckRef.current && (
+          <div className="mb-4 p-3 bg-yellow-900 border border-yellow-500 rounded-md">
+            <p className="text-yellow-300 text-sm text-center">
+              🔄 <strong>Monitoring Aktif:</strong> Sistem terus memantau perangkat Anda. 
+              Pastikan semua akses tetap diizinkan untuk dapat memulai ujian.
+            </p>
+          </div>
+        )}
+        
         <button 
           onClick={startExam} 
           disabled={!allChecksPassed} 
-          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed"
+          className={`w-full font-bold py-3 px-4 rounded-lg transition-all duration-300 ${
+            allChecksPassed 
+              ? 'bg-green-600 hover:bg-green-700 text-white transform hover:scale-105' 
+              : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+          }`}
         >
           {allChecksPassed ? 'Mulai Ujian' : 
            checks.device === false ? 'Gunakan Desktop/Laptop' :
@@ -292,6 +526,13 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
            checks.microphone === false ? 'Izinkan Akses Mikrofon' :
            'Menunggu Pemeriksaan Selesai'}
         </button>
+        
+        {/* Additional info */}
+        <div className="mt-4 text-center">
+          <p className="text-xs text-gray-500">
+            💡 Sistem akan terus memantau perangkat Anda. Jangan menonaktifkan akses yang sudah diberikan.
+          </p>
+        </div>
       </div>
     </div>
   );
