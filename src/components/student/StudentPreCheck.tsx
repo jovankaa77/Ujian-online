@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
+import { detectExtensions, startExtensionMonitoring, ExtensionDetectionResult } from '../../utils/extensionDetection';
 
 interface StudentPreCheckProps {
   navigateTo: (page: string, data?: any) => void;
@@ -14,12 +15,15 @@ interface DeviceChecks {
   camera: boolean | null;
   screenCount: boolean | null;
   microphone: boolean | null;
+  extensions: boolean | null;
 }
 
 const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateBack, appState, user }) => {
   const { studentInfo } = appState;
-  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null });
+  const [checks, setChecks] = useState<DeviceChecks>({ device: null, camera: null, screenCount: null, microphone: null, extensions: null });
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [extensionResult, setExtensionResult] = useState<ExtensionDetectionResult | null>(null);
+  const [extensionMonitoringCleanup, setExtensionMonitoringCleanup] = useState<(() => void) | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<MediaStream | null>(null);
   const monitoringIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -33,6 +37,10 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
                      window.screen.width < 1024;
     
     setChecks(c => ({ ...c, device: !isMobile }));
+    
+    // Start extension detection
+    checkExtensions();
+    
     // Check screen count
     const checkScreens = async () => {
       try {
@@ -51,6 +59,14 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     checkScreens();
     
     if (isMobile) return;
+    
+    // Start extension monitoring
+    const cleanup = startExtensionMonitoring((result) => {
+      setExtensionResult(result);
+      setChecks(c => ({ ...c, extensions: !result.hasRiskyExtensions }));
+    }, 15000); // Check every 15 seconds
+    
+    setExtensionMonitoringCleanup(() => cleanup);
     
     // Check camera and microphone permissions
     const checkMediaDevices = async () => {
@@ -110,6 +126,18 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     checkMediaDevices();
   }, []);
 
+  // Function to check extensions
+  const checkExtensions = async () => {
+    try {
+      const result = await detectExtensions();
+      setExtensionResult(result);
+      setChecks(c => ({ ...c, extensions: !result.hasRiskyExtensions }));
+    } catch (error) {
+      console.error('Error checking extensions:', error);
+      setChecks(c => ({ ...c, extensions: true })); // Allow if detection fails
+    }
+  };
+
   // Continuous monitoring function
   const startContinuousMonitoring = useCallback(() => {
     if (isMonitoring) return;
@@ -153,7 +181,8 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         
         setChecks(prevChecks => ({
           ...prevChecks,
-          device: !isMobile
+          device: !isMobile,
+          // Extensions are monitored separately, don't reset here
         }));
         
       } catch (error) {
@@ -162,7 +191,8 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         setChecks(prevChecks => ({
           ...prevChecks,
           camera: false,
-          microphone: false
+          microphone: false,
+          // Extensions check remains unchanged
         }));
       }
     };
@@ -223,13 +253,16 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     }
   };
 
-  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone;
+  const allChecksPassed = checks.device && checks.camera && checks.screenCount && checks.microphone && checks.extensions;
 
   // Cleanup function
   useEffect(() => {
     return () => {
       if (monitoringIntervalRef.current) {
         clearInterval(monitoringIntervalRef.current);
+      }
+      if (extensionMonitoringCleanup) {
+        extensionMonitoringCleanup();
       }
       if (currentStreamRef.current) {
         currentStreamRef.current.getTracks().forEach(track => track.stop());
@@ -242,6 +275,17 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     if (!allChecksPassed) {
       alert("Semua pemeriksaan perangkat harus berhasil sebelum memulai ujian.");
       return;
+    }
+
+    // Final extension check
+    try {
+      const finalExtensionCheck = await detectExtensions();
+      if (finalExtensionCheck.hasRiskyExtensions) {
+        alert("Terdeteksi ekstensi browser yang tidak diizinkan. Silakan nonaktifkan ekstensi tersebut dan coba lagi.");
+        return;
+      }
+    } catch (error) {
+      console.warn('Final extension check failed:', error);
     }
 
     // Request fullscreen immediately on user interaction
@@ -370,12 +414,19 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
     
     try {
       // Reset all states
-      setChecks({ device: null, camera: null, screenCount: null, microphone: null });
+      setChecks({ device: null, camera: null, screenCount: null, microphone: null, extensions: null });
+      setExtensionResult(null);
       
       // Stop current monitoring
       if (monitoringIntervalRef.current) {
         clearInterval(monitoringIntervalRef.current);
         setIsMonitoring(false);
+      }
+      
+      // Stop extension monitoring
+      if (extensionMonitoringCleanup) {
+        extensionMonitoringCleanup();
+        setExtensionMonitoringCleanup(null);
       }
       
       // Stop current streams
@@ -408,6 +459,17 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
                          window.screen.width < 1024;
         
         setChecks(c => ({ ...c, device: !isMobile }));
+        
+        // Re-check extensions
+        checkExtensions();
+        
+        // Restart extension monitoring
+        const cleanup = startExtensionMonitoring((result) => {
+          setExtensionResult(result);
+          setChecks(c => ({ ...c, extensions: !result.hasRiskyExtensions }));
+        }, 15000);
+        
+        setExtensionMonitoringCleanup(() => cleanup);
         
         // Re-check screen count
         const recheckScreens = async () => {
@@ -511,7 +573,45 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           {renderCheckItem("Layar Tunggal", checks.screenCount)}
           {renderCheckItem("Akses Kamera", checks.camera)}
           {renderCheckItem("Akses Mikrofon", checks.microphone)}
+          {renderCheckItem("Ekstensi Browser Aman", checks.extensions)}
         </ul>
+        
+        {/* Extension Details */}
+        {extensionResult && extensionResult.detectedExtensions.length > 0 && (
+          <div className="mb-6 bg-red-900 border border-red-500 p-4 rounded-lg">
+            <h4 className="text-red-300 font-bold mb-3">🚫 Ekstensi Terdeteksi ({extensionResult.detectedExtensions.length})</h4>
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              {extensionResult.detectedExtensions.map((ext, index) => (
+                <div key={index} className="bg-red-800 p-2 rounded text-sm">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="font-bold text-red-200">{ext.name}</span>
+                      <span className={`ml-2 px-2 py-1 text-xs rounded ${
+                        ext.risk === 'high' ? 'bg-red-600' : 
+                        ext.risk === 'medium' ? 'bg-yellow-600' : 'bg-gray-600'
+                      }`}>
+                        {ext.risk === 'high' ? 'TINGGI' : ext.risk === 'medium' ? 'SEDANG' : 'RENDAH'}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-red-300 text-xs mt-1">{ext.description}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 bg-red-800 border border-red-600 p-3 rounded">
+              <p className="text-red-200 text-sm">
+                <strong>⚠️ Peringatan:</strong> Ekstensi di atas dapat membantu dalam ujian dan tidak diizinkan. 
+                Silakan nonaktifkan ekstensi tersebut di pengaturan browser Anda, lalu klik "Refresh Pemeriksaan".
+              </p>
+              <div className="mt-2 text-xs text-red-300">
+                <p><strong>Cara menonaktifkan:</strong></p>
+                <p>1. Klik menu browser (⋮) → More tools → Extensions</p>
+                <p>2. Matikan toggle ekstensi yang terdeteksi</p>
+                <p>3. Klik "Refresh Pemeriksaan" di bawah</p>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Manual refresh button */}
         <div className="mb-6 text-center">
@@ -544,6 +644,12 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         {checks.microphone === false && (
           <p className="text-red-400 text-center mb-4">
             ⚠️ Mohon izinkan akses mikrofon di browser Anda untuk monitoring audio, lalu segarkan halaman ini.
+          </p>
+        )}
+        
+        {checks.extensions === false && (
+          <p className="text-red-400 text-center mb-4">
+            🚫 Terdeteksi ekstensi browser yang tidak diizinkan. Silakan nonaktifkan ekstensi tersebut.
           </p>
         )}
         
@@ -600,6 +706,15 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           </div>
         )}
         
+        {checks.device && checks.camera && checks.screenCount && checks.microphone && !checks.extensions && (
+          <div className="mb-4 p-3 bg-red-900 border border-red-500 rounded-md">
+            <p className="text-red-300 text-sm">
+              🚫 <strong>Ekstensi Tidak Diizinkan:</strong> Terdeteksi ekstensi browser yang dapat membantu dalam ujian. 
+              Silakan nonaktifkan ekstensi tersebut untuk melanjutkan.
+            </p>
+          </div>
+        )}
+        
         {/* Dynamic status messages */}
         {!allChecksPassed && permissionCheckRef.current && (
           <div className="mb-4 p-3 bg-yellow-900 border border-yellow-500 rounded-md">
@@ -624,6 +739,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
            checks.screenCount === false ? 'Gunakan Layar Tunggal' :
            checks.camera === false ? 'Izinkan Akses Kamera' :
            checks.microphone === false ? 'Izinkan Akses Mikrofon' :
+           checks.extensions === false ? 'Nonaktifkan Ekstensi Berbahaya' :
            'Menunggu Pemeriksaan Selesai'}
         </button>
         
