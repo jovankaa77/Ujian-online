@@ -366,24 +366,124 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
 
   // Manual refresh function
   const handleManualRefresh = async () => {
-    setChecks({ device: null, camera: null, screenCount: null, microphone: null });
+    console.log("🔄 Manual refresh initiated");
     
-    // Stop current monitoring
-    if (monitoringIntervalRef.current) {
-      clearInterval(monitoringIntervalRef.current);
-      setIsMonitoring(false);
+    try {
+      // Reset all states
+      setChecks({ device: null, camera: null, screenCount: null, microphone: null });
+      
+      // Stop current monitoring
+      if (monitoringIntervalRef.current) {
+        clearInterval(monitoringIntervalRef.current);
+        setIsMonitoring(false);
+      }
+      
+      // Stop current streams
+      if (currentStreamRef.current) {
+        currentStreamRef.current.getTracks().forEach(track => track.stop());
+        currentStreamRef.current = null;
+      }
+      
+      // Reset audio reference
+      if (audioRef.current) {
+        audioRef.current.getTracks().forEach(track => track.stop());
+        audioRef.current = null;
+      }
+      
+      // Clear video element
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      
+      // Reset permission check flag
+      permissionCheckRef.current = false;
+      
+      // Wait a moment then restart all checks
+      setTimeout(() => {
+        console.log("🔄 Restarting device checks...");
+        
+        // Re-run device checks
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                         (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
+                         window.screen.width < 1024;
+        
+        setChecks(c => ({ ...c, device: !isMobile }));
+        
+        // Re-check screen count
+        const recheckScreens = async () => {
+          try {
+            if ('getScreenDetails' in window) {
+              const screenDetails = await (window as any).getScreenDetails();
+              setChecks(c => ({ ...c, screenCount: screenDetails.screens.length === 1 }));
+            } else {
+              setChecks(c => ({ ...c, screenCount: true }));
+            }
+          } catch {
+            setChecks(c => ({ ...c, screenCount: true }));
+          }
+        };
+        
+        recheckScreens();
+        
+        if (!isMobile) {
+          // Re-check media devices
+          const recheckMediaDevices = async () => {
+            try {
+              permissionCheckRef.current = true;
+              const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: true, 
+                audio: true 
+              });
+              
+              const videoTracks = stream.getVideoTracks();
+              const audioTracks = stream.getAudioTracks();
+              
+              setChecks(c => ({ 
+                ...c, 
+                camera: videoTracks.length > 0,
+                microphone: audioTracks.length > 0
+              }));
+              
+              if (videoRef.current && videoTracks.length > 0) {
+                const videoStream = new MediaStream(videoTracks);
+                currentStreamRef.current = stream;
+                videoRef.current.srcObject = videoStream;
+              }
+              
+              if (audioTracks.length > 0) {
+                audioRef.current = new MediaStream(audioTracks);
+              }
+
+              // Restart continuous monitoring
+              if (videoTracks.length > 0 && audioTracks.length > 0) {
+                startContinuousMonitoring();
+              }
+              
+            } catch (err) {
+              console.error("Error re-accessing media devices:", err);
+              
+              try {
+                const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                setChecks(c => ({ ...c, camera: true, microphone: false }));
+                if (videoRef.current) {
+                  currentStreamRef.current = videoStream;
+                  videoRef.current.srcObject = videoStream;
+                }
+              } catch (videoErr) {
+                setChecks(c => ({ ...c, camera: false, microphone: false }));
+              }
+            }
+          };
+          
+          recheckMediaDevices();
+        }
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Error during manual refresh:", error);
+      // If there's an error, show a message but don't reload the page
+      alert("Terjadi kesalahan saat refresh. Silakan coba lagi.");
     }
-    
-    // Stop current streams
-    if (currentStreamRef.current) {
-      currentStreamRef.current.getTracks().forEach(track => track.stop());
-      currentStreamRef.current = null;
-    }
-    
-    // Restart checks
-    setTimeout(() => {
-      window.location.reload();
-    }, 500);
   };
 
   return (
