@@ -68,7 +68,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const attendancePhotoTimestamps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120];
+  const attendancePhotoTimestamps = [1, 5, 15, 30, 60, 120];
   const [attendancePhotos, setAttendancePhotos] = useState<{[key: string]: string}>({});
   const examStartTimeRef = useRef<Date | null>(null);
   const [attendancePhotoCount, setAttendancePhotoCount] = useState(0);
@@ -688,15 +688,15 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     fetchQuestions();
   }, [exam.id]);
 
-  // Simple photo capture function
+  // Simple photo capture function with compression
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) {
       console.log("❌ Missing video or canvas element");
       return null;
     }
-    
+
     const video = videoRef.current;
-    
+
     // Check if video is actually playing and has dimensions
     if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
       console.log("❌ Video not ready:", {
@@ -706,38 +706,57 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       });
       return null;
     }
-    
+
     try {
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
-      
+
       if (!context) {
         console.log("❌ Cannot get canvas context");
         return null;
       }
-      
-      // Set canvas dimensions to match video
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      
+
+      // Resize image to reduce file size - max 640x480
+      const maxWidth = 640;
+      const maxHeight = 480;
+      let width = video.videoWidth;
+      let height = video.videoHeight;
+
+      // Calculate aspect ratio
+      const aspectRatio = width / height;
+
+      if (width > maxWidth) {
+        width = maxWidth;
+        height = width / aspectRatio;
+      }
+
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * aspectRatio;
+      }
+
+      // Set canvas dimensions to resized dimensions
+      canvas.width = width;
+      canvas.height = height;
+
       // Clear canvas first
       context.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw video frame to canvas
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Convert to base64 with high quality
-      const imageData = canvas.toDataURL('image/jpeg', 0.9);
-      
+
+      // Draw video frame to canvas with reduced size
+      context.drawImage(video, 0, 0, width, height);
+
+      // Convert to base64 with reduced quality (0.5 instead of 0.9)
+      const imageData = canvas.toDataURL('image/jpeg', 0.5);
+
       // Check if image is not just black/empty
-      if (imageData.length < 10000) { // Very small image likely means it's black
+      if (imageData.length < 5000) { // Very small image likely means it's black
         console.log("⚠️ Captured image seems too small/black");
         return null;
       }
-      
-      console.log("✅ Photo captured successfully:", canvas.width, "x", canvas.height);
+
+      console.log("✅ Photo captured successfully:", canvas.width, "x", canvas.height, "- compressed");
       return imageData;
-      
+
     } catch (error) {
       console.error("Failed to capture photo:", error);
       return null;

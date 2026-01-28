@@ -88,11 +88,11 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
   // Extract attendance photos from session data
   const getAttendancePhotos = (session: Session): AttendancePhoto[] => {
     const photos: AttendancePhoto[] = [];
-    
-    // Define the expected photo schedule
-    const expectedPhotoTimes = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120];
+
+    // Define the expected photo schedule - updated to match new intervals
+    const expectedPhotoTimes = [1, 5, 15, 30, 60, 120];
     const expectedLabels = [...expectedPhotoTimes.map(time => `Menit ke-${time}`), 'Selesai'];
-    
+
     Object.keys(session).forEach(key => {
       if (key.startsWith('attendancePhoto_')) {
         const photoData = session[key];
@@ -105,10 +105,10 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
         }
       }
     });
-    
+
     // Sort photos by expected order
     const sortOrder = expectedLabels;
-    
+
     photos.sort((a, b) => {
       const indexA = sortOrder.indexOf(a.label);
       const indexB = sortOrder.indexOf(b.label);
@@ -118,7 +118,7 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
       if (indexB === -1) return -1;
       return indexA - indexB;
     });
-    
+
     return photos;
   };
 
