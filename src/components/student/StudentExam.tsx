@@ -60,7 +60,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const speechDetectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isRestartingAudio, setIsRestartingAudio] = useState(false);
-  
+  const vadHealthCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const lastVadActivityRef = useRef<number>(Date.now());
+  const vadInstanceRef = useRef<MicVAD | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const isFinishedRef = useRef(false);
+
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const attendancePhotoTimestamps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120];
@@ -81,76 +86,107 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const cameraInitRetryCount = useRef(0);
   const maxCameraRetries = 5;
 
-  useEffect(() => {
-    // Initialize audio monitoring
-    const initializeAudioMonitoring = async () => {
-      try {
-        // Check if VAD is available from global script
-        if (typeof window === 'undefined' || !(window as any).vad) {
-          throw new Error('VAD library not loaded. Please refresh the page.');
-        }
-        
-        // Request microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        });
-        
-        setAudioStream(stream);
-        
-        // Initialize VAD
-        const vad = await (window as any).vad.MicVAD.new({
-          stream: stream,
-          onSpeechStart: () => {
-            if (audioRecordingCountRef.current >= 10) {
-              console.log("Max recordings reached (10), ignoring speech");
-              return;
-            }
+  const initializeVAD = async (isRetry = false) => {
+    if (isFinishedRef.current || audioRecordingCountRef.current >= 10) {
+      console.log("VAD init skipped - exam finished or max recordings reached");
+      return;
+    }
 
-            if (isRecordingAudioRef.current) {
-              console.log("Already recording, ignoring new speech start");
-              return;
-            }
-
-            speechStartTimeRef.current = Date.now();
-
-            // Start recording after 1 second of continuous speech
-            speechDetectionTimeoutRef.current = setTimeout(() => {
-              if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudioRef.current) {
-                console.log("1 second of speech detected, starting recording...");
-                startAudioRecording(stream);
-              }
-            }, 1000);
-          },
-          onSpeechEnd: () => {
-            console.log("Speech ended");
-            speechStartTimeRef.current = null;
-
-            // Clear the detection timeout if speech ends before 1 second
-            if (speechDetectionTimeoutRef.current) {
-              clearTimeout(speechDetectionTimeoutRef.current);
-              speechDetectionTimeoutRef.current = null;
-            }
-          },
-          onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
-          baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
-        });
-        
-        setVadInstance(vad);
-        vad.start();
-        console.log("✅ Voice Activity Detection initialized");
-        
-      } catch (error) {
-        console.error("❌ Failed to initialize audio monitoring:", error);
-        setVadError(`Audio monitoring failed: ${error.message}`);
+    try {
+      if (typeof window === 'undefined' || !(window as any).vad) {
+        throw new Error('VAD library not loaded');
       }
-    };
-    
+
+      if (vadInstanceRef.current) {
+        try {
+          vadInstanceRef.current.destroy();
+        } catch (e) {}
+        vadInstanceRef.current = null;
+        setVadInstance(null);
+      }
+
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+        setAudioStream(null);
+      }
+
+      if (isRetry) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      audioStreamRef.current = stream;
+      setAudioStream(stream);
+
+      const vad = await (window as any).vad.MicVAD.new({
+        stream: stream,
+        onSpeechStart: () => {
+          lastVadActivityRef.current = Date.now();
+
+          if (audioRecordingCountRef.current >= 10) {
+            console.log("Max recordings reached (10), ignoring speech");
+            return;
+          }
+
+          if (isRecordingAudioRef.current) {
+            console.log("Already recording, ignoring new speech start");
+            return;
+          }
+
+          speechStartTimeRef.current = Date.now();
+
+          if (speechDetectionTimeoutRef.current) {
+            clearTimeout(speechDetectionTimeoutRef.current);
+          }
+
+          speechDetectionTimeoutRef.current = setTimeout(() => {
+            if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudioRef.current) {
+              console.log("1 second of speech detected, starting recording...");
+              startAudioRecording(audioStreamRef.current!);
+            }
+          }, 1000);
+        },
+        onSpeechEnd: () => {
+          lastVadActivityRef.current = Date.now();
+          console.log("Speech ended");
+          speechStartTimeRef.current = null;
+
+          if (speechDetectionTimeoutRef.current) {
+            clearTimeout(speechDetectionTimeoutRef.current);
+            speechDetectionTimeoutRef.current = null;
+          }
+        },
+        onFrameProcessed: () => {
+          lastVadActivityRef.current = Date.now();
+        },
+        onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
+        baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
+      });
+
+      vadInstanceRef.current = vad;
+      setVadInstance(vad);
+      vad.start();
+      lastVadActivityRef.current = Date.now();
+      setVadError(null);
+      console.log("Voice Activity Detection initialized");
+
+    } catch (error: any) {
+      console.error("Failed to initialize VAD:", error);
+      setVadError(`Audio monitoring failed: ${error.message}`);
+    }
+  };
+
+  useEffect(() => {
     if (!isFinished && !isLoading && questions.length > 0) {
-      initializeAudioMonitoring();
+      initializeVAD();
     }
     
     // Initialize audio context
@@ -233,27 +269,66 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Start camera initialization immediately
     initializeCamera();
     
-    // Cleanup
     return () => {
-      // Cleanup audio monitoring
-      if (vadInstance) {
-        vadInstance.destroy();
+      if (vadInstanceRef.current) {
+        try {
+          vadInstanceRef.current.destroy();
+        } catch (e) {}
       }
-      if (audioStream) {
-        audioStream.getTracks().forEach(track => track.stop());
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
       }
       if (recordingTimeoutRef.current) {
         clearTimeout(recordingTimeoutRef.current);
       }
-      
+      if (speechDetectionTimeoutRef.current) {
+        clearTimeout(speechDetectionTimeoutRef.current);
+      }
+      if (vadHealthCheckRef.current) {
+        clearInterval(vadHealthCheckRef.current);
+      }
+
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
           track.stop();
-          console.log("🛑 Camera track stopped");
+          console.log("Camera track stopped");
         });
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (isFinished || isLoading || questions.length === 0) return;
+
+    vadHealthCheckRef.current = setInterval(() => {
+      if (isFinishedRef.current || audioRecordingCountRef.current >= 10) {
+        if (vadHealthCheckRef.current) {
+          clearInterval(vadHealthCheckRef.current);
+        }
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceLastActivity = now - lastVadActivityRef.current;
+      const streamActive = audioStreamRef.current?.active;
+      const vadRunning = vadInstanceRef.current !== null;
+
+      if (timeSinceLastActivity > 30000 || !streamActive || !vadRunning) {
+        console.log("VAD health check failed, auto-restarting...", {
+          timeSinceLastActivity,
+          streamActive,
+          vadRunning
+        });
+        initializeVAD(true);
+      }
+    }, 15000);
+
+    return () => {
+      if (vadHealthCheckRef.current) {
+        clearInterval(vadHealthCheckRef.current);
+      }
+    };
+  }, [isFinished, isLoading, questions.length]);
 
   const startAudioRecording = (stream: MediaStream) => {
     if (isRecordingAudioRef.current) {
@@ -364,96 +439,29 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     }
   };
 
-  // Function to restart audio monitoring
   const restartAudioMonitoring = async () => {
     if (isRestartingAudio) return;
-    
+
     setIsRestartingAudio(true);
-    console.log("🔄 Manually restarting audio monitoring...");
-    
+    console.log("Manually restarting audio monitoring...");
+
     try {
-      // Cleanup existing audio resources
-      if (vadInstance) {
-        vadInstance.destroy();
-        setVadInstance(null);
-      }
-      if (audioStream) {
-        audioStream.getTracks().forEach(track => track.stop());
-        setAudioStream(null);
-      }
-      if (recordingTimeoutRef.current) {
-        clearTimeout(recordingTimeoutRef.current);
-      }
-      
-      // Reset states
-      setVadError(null);
       isRecordingAudioRef.current = false;
       setIsRecordingAudio(false);
       setMediaRecorder(null);
-      
-      // Wait a moment before reinitializing
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Check if VAD is available from global script
-      if (typeof window === 'undefined' || !(window as any).vad) {
-        throw new Error('VAD library not loaded. Please refresh the page.');
+
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
       }
-      
-      // Reinitialize audio monitoring
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-      
-      setAudioStream(stream);
-      
-      // Initialize VAD with new stream
-      const vad = await (window as any).vad.MicVAD.new({
-        stream: stream,
-        onSpeechStart: () => {
-          if (audioRecordingCountRef.current >= 10) {
-            console.log("Max recordings reached (10), ignoring speech");
-            return;
-          }
+      if (speechDetectionTimeoutRef.current) {
+        clearTimeout(speechDetectionTimeoutRef.current);
+      }
 
-          if (isRecordingAudio) {
-            console.log("Already recording, ignoring new speech start");
-            return;
-          }
+      await initializeVAD(true);
+      console.log("Audio monitoring restarted successfully");
 
-          speechStartTimeRef.current = Date.now();
-
-          // Start recording after 1 second of continuous speech
-          speechDetectionTimeoutRef.current = setTimeout(() => {
-            if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudio) {
-              console.log("1 second of speech detected, starting recording...");
-              startAudioRecording(stream);
-            }
-          }, 1000);
-        },
-        onSpeechEnd: () => {
-          console.log("Speech ended");
-          speechStartTimeRef.current = null;
-
-          // Clear the detection timeout if speech ends before 1 second
-          if (speechDetectionTimeoutRef.current) {
-            clearTimeout(speechDetectionTimeoutRef.current);
-            speechDetectionTimeoutRef.current = null;
-          }
-        },
-        onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
-        baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
-      });
-      
-      setVadInstance(vad);
-      vad.start();
-      console.log("✅ Audio monitoring restarted successfully");
-      
-    } catch (error) {
-      console.error("❌ Failed to restart audio monitoring:", error);
+    } catch (error: any) {
+      console.error("Failed to restart audio monitoring:", error);
       setVadError(`Audio restart failed: ${error.message}`);
     } finally {
       setIsRestartingAudio(false);
@@ -1005,7 +1013,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Capture final attendance photo before finishing
     const finalLabel = "Selesai";
     await captureAttendancePhoto(finalLabel);
-    
+
+    isFinishedRef.current = true;
     setIsFinished(true);
     setShowConfirmModal(false);
     setShowUnansweredModal(false);
