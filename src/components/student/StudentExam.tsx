@@ -396,19 +396,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       recorder.onstop = async () => {
         console.log("Audio recording stopped, processing...");
 
-        if (audioChunksRef.current.length > 0 && audioRecordingCountRef.current < 10) {
+        const currentCount = audioRecordingCountRef.current;
+        if (audioChunksRef.current.length > 0 && currentCount < 10) {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
 
           const reader = new FileReader();
           reader.onloadend = async () => {
-            if (audioRecordingCountRef.current >= 10) {
-              console.log("Max recordings reached during processing, discarding");
-              isRecordingAudioRef.current = false;
-              setIsRecordingAudio(false);
-              setMediaRecorder(null);
-              return;
-            }
-
             const base64Audio = reader.result as string;
 
             const audioData = {
@@ -424,7 +417,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             try {
               await updateDoc(sessionDocRef, audioData);
               setAudioRecordingCount(prev => {
-                const newCount = Math.min(prev + 1, 10);
+                const newCount = prev + 1;
                 audioRecordingCountRef.current = newCount;
                 console.log(`Audio recording saved. Count: ${newCount}/10`);
                 return newCount;
