@@ -99,8 +99,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
       if (vadInstanceRef.current) {
         try {
+          vadInstanceRef.current.pause();
           vadInstanceRef.current.destroy();
-        } catch (e) {}
+        } catch (e) {
+          console.log("Error destroying old VAD:", e);
+        }
         vadInstanceRef.current = null;
         setVadInstance(null);
       }
@@ -112,24 +115,35 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       }
 
       if (isRetry) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          sampleRate: 16000
         }
       });
+
+      if (!stream.active || stream.getAudioTracks().length === 0) {
+        throw new Error('Audio stream not active');
+      }
 
       audioStreamRef.current = stream;
       setAudioStream(stream);
 
       const vad = await (window as any).vad.MicVAD.new({
         stream: stream,
+        positiveSpeechThreshold: 0.5,
+        negativeSpeechThreshold: 0.35,
+        redemptionFrames: 8,
+        preSpeechPadFrames: 1,
+        minSpeechFrames: 3,
         onSpeechStart: () => {
           lastVadActivityRef.current = Date.now();
+          console.log("Speech detected!");
 
           if (audioRecordingCountRef.current >= 10) {
             console.log("Max recordings reached (10), ignoring speech");
@@ -148,9 +162,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           }
 
           speechDetectionTimeoutRef.current = setTimeout(() => {
-            if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudioRef.current) {
+            if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudioRef.current && audioStreamRef.current?.active) {
               console.log("1 second of speech detected, starting recording...");
-              startAudioRecording(audioStreamRef.current!);
+              startAudioRecording(audioStreamRef.current);
             }
           }, 1000);
         },
@@ -164,7 +178,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             speechDetectionTimeoutRef.current = null;
           }
         },
-        onFrameProcessed: () => {
+        onFrameProcessed: (probs: { isSpeech: number }) => {
           lastVadActivityRef.current = Date.now();
         },
         onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
@@ -176,20 +190,31 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       vad.start();
       lastVadActivityRef.current = Date.now();
       setVadError(null);
-      console.log("Voice Activity Detection initialized");
+      console.log("VAD initialized and started");
+
+      setTimeout(() => {
+        if (vadInstanceRef.current && audioStreamRef.current?.active) {
+          console.log("VAD verification: running");
+        } else {
+          console.log("VAD verification failed, retrying...");
+          initializeVAD(true);
+        }
+      }, 2000);
 
     } catch (error: any) {
       console.error("Failed to initialize VAD:", error);
       setVadError(`Audio monitoring failed: ${error.message}`);
+
+      setTimeout(() => {
+        if (!isFinishedRef.current && audioRecordingCountRef.current < 10) {
+          console.log("Auto-retrying VAD initialization...");
+          initializeVAD(true);
+        }
+      }, 3000);
     }
   };
 
   useEffect(() => {
-    if (!isFinished && !isLoading && questions.length > 0) {
-      initializeVAD();
-    }
-    
-    // Initialize audio context
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     
     // Initialize camera with retry mechanism
@@ -300,6 +325,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   useEffect(() => {
     if (isFinished || isLoading || questions.length === 0) return;
 
+    if (!vadInstanceRef.current) {
+      console.log("VAD not initialized, starting now...");
+      initializeVAD();
+    }
+
     vadHealthCheckRef.current = setInterval(() => {
       if (isFinishedRef.current || audioRecordingCountRef.current >= 10) {
         if (vadHealthCheckRef.current) {
@@ -312,16 +342,18 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       const timeSinceLastActivity = now - lastVadActivityRef.current;
       const streamActive = audioStreamRef.current?.active;
       const vadRunning = vadInstanceRef.current !== null;
+      const audioTracksAlive = audioStreamRef.current?.getAudioTracks().every(t => t.readyState === 'live');
 
-      if (timeSinceLastActivity > 30000 || !streamActive || !vadRunning) {
+      if (timeSinceLastActivity > 10000 || !streamActive || !vadRunning || !audioTracksAlive) {
         console.log("VAD health check failed, auto-restarting...", {
           timeSinceLastActivity,
           streamActive,
-          vadRunning
+          vadRunning,
+          audioTracksAlive
         });
         initializeVAD(true);
       }
-    }, 15000);
+    }, 5000);
 
     return () => {
       if (vadHealthCheckRef.current) {
