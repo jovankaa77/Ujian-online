@@ -864,126 +864,51 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   };
 
   const handleViolation = (reason = "Unknown") => {
-    const newViolations = violations + 1;
+    if (isFinished || violations >= 3) {
+      console.log("Violation ignored - exam finished or max violations reached");
+      return;
+    }
+
+    const newViolations = Math.min(violations + 1, 3);
     setViolations(newViolations);
     setViolationReason(reason);
-    
-    console.log("🚨 Violation detected:", reason, "- Attempting to capture photo");
-    
-    // Try to capture photo with retry mechanism
-    let photoData = null;
-    
-    // First attempt
-    photoData = capturePhoto();
-    
-    // If first attempt fails, wait a bit and try again
-    if (!photoData && videoRef.current) {
-      console.log("🔄 First photo attempt failed, retrying...");
-      setTimeout(() => {
-        const retryPhoto = capturePhoto();
-        if (retryPhoto) {
-          // Update the violation record with the retry photo
-          const retryViolationData: any = {};
-          retryViolationData[`violationSnapshot_${newViolations}`] = {
-            imageData: retryPhoto,
-            timestamp: new Date().toISOString(),
-            violationType: reason
-          };
-          
-          updateDoc(sessionDocRef, retryViolationData).catch(error => {
-            console.error("Failed to save retry photo:", error);
-          });
-        }
-      }, 500);
-    }
-    
-    // Prepare violation data
+
+    console.log("Violation detected:", reason, "- Count:", newViolations);
+
+    const photoData = capturePhoto();
+
     const violationData: any = {
       violations: newViolations,
-      lastViolation: { 
-        reason, 
-        timestamp: new Date(),
-        hasSnapshot: !!photoData
+      lastViolation: {
+        reason,
+        timestamp: new Date().toISOString()
       }
     };
-    
-    // Add photo if captured
-    if (photoData) {
-      console.log("✅ Adding photo to violation data");
-      violationData[`violationSnapshot_${newViolations}`] = {
-        imageData: photoData,
-        timestamp: new Date().toISOString(),
-        violationType: reason
-      };
-    } else {
-      console.log("❌ No photo captured for violation");
-    }
-    
-    // Save to Firebase
+
+    violationData[`violationSnapshot_${newViolations}`] = {
+      timestamp: new Date().toISOString(),
+      violationType: reason
+    };
+
     updateDoc(sessionDocRef, violationData).catch(error => {
       console.error("Failed to save violation data:", error);
     });
-    
-    playWarningSound();
-    
-    if (newViolations >= 3) {
-      finishExam(`Diskualifikasi: ${reason}`);
-    } else {
-      setShowViolationModal(true);
-      
-      // For first two violations, auto re-enter fullscreen after showing warning
-      if (newViolations <= 2) {
-        setTimeout(() => {
-          setShowViolationModal(false);
-          // Auto re-enter fullscreen immediately after closing modal
-          setTimeout(() => {
-            if (!isFinished && !isInFullscreen()) {
-              enterFullscreen();
-            }
-          }, 100);
-        }, 3000);
-      } else {
-        // For third violation, modal stays open (exam will be finished)
-        setTimeout(() => setShowViolationModal(false), 3000);
-      }
-    }
-  };
 
-  const handleViolationOld = (reason = "Unknown") => {
-    const newViolations = violations + 1;
-    setViolations(newViolations);
-    setViolationReason(reason);
-    
-    // Capture snapshot on violation
-    captureViolationSnapshot(reason).then(snapshot => {
-      const violationData = {
-        violations: newViolations,
-        lastViolation: { reason, timestamp: new Date() }
-      };
-      
-      if (snapshot) {
-        violationData[`violationSnapshot_${newViolations}`] = snapshot;
-      }
-      
-      updateDoc(sessionDocRef, violationData);
-    }).catch(error => {
-      console.error("Error in violation handling:", error);
-    });
-    
     playWarningSound();
-    
+
     if (newViolations >= 3) {
       finishExam(`Diskualifikasi: ${reason}`);
     } else {
       setShowViolationModal(true);
-      setTimeout(() => setShowViolationModal(false), 3000);
-      
-      // Auto re-enter fullscreen after violation
+
       setTimeout(() => {
-        if (!isFinished && !isInFullscreen()) {
-          enterFullscreen();
-        }
-      }, 1500);
+        setShowViolationModal(false);
+        setTimeout(() => {
+          if (!isFinished && !isInFullscreen()) {
+            enterFullscreen();
+          }
+        }, 100);
+      }, 3000);
     }
   };
 

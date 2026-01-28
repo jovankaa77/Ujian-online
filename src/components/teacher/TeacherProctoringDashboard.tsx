@@ -20,6 +20,7 @@ interface Session {
   violationSnapshot_1?: ViolationInfo;
   violationSnapshot_2?: ViolationInfo;
   violationSnapshot_3?: ViolationInfo;
+  [key: string]: unknown;
 }
 
 interface TeacherProctoringDashboardProps {
@@ -126,10 +127,23 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
   }, [sessions, searchTerm]);
 
   const getViolationsList = (session: Session): ViolationInfo[] => {
+    const violationCount = Math.min(session.violations || 0, 3);
     const violations: ViolationInfo[] = [];
-    if (session.violationSnapshot_1) violations.push(session.violationSnapshot_1);
-    if (session.violationSnapshot_2) violations.push(session.violationSnapshot_2);
-    if (session.violationSnapshot_3) violations.push(session.violationSnapshot_3);
+
+    for (let i = 1; i <= violationCount; i++) {
+      const snapshotKey = `violationSnapshot_${i}` as keyof Session;
+      const snapshot = session[snapshotKey] as ViolationInfo | undefined;
+
+      if (snapshot && snapshot.violationType) {
+        violations.push(snapshot);
+      } else {
+        violations.push({
+          timestamp: new Date().toISOString(),
+          violationType: `Pelanggaran ${i}`
+        });
+      }
+    }
+
     return violations;
   };
 
@@ -235,13 +249,14 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredSessions.map(session => {
               const violationsList = getViolationsList(session);
+              const violationCount = Math.min(session.violations || 0, 3);
               return (
                 <div
                   key={session.id}
                   className={`bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 ${
                     session.status === 'disqualified'
                       ? 'border-red-600'
-                      : session.violations > 0
+                      : violationCount > 0
                       ? 'border-yellow-500'
                       : 'border-gray-700'
                   }`}
@@ -275,19 +290,19 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
                     </div>
 
                     <div className={`p-3 rounded-lg mb-3 ${
-                      session.violations > 0 ? 'bg-yellow-900/30' : 'bg-green-900/30'
+                      violationCount > 0 ? 'bg-yellow-900/30' : 'bg-green-900/30'
                     }`}>
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-semibold text-sm">Jumlah Pelanggaran</span>
                         <span className={`text-xl font-bold ${
-                          session.violations >= 3 ? 'text-red-400' :
-                          session.violations > 0 ? 'text-yellow-400' : 'text-green-400'
+                          violationCount >= 3 ? 'text-red-400' :
+                          violationCount > 0 ? 'text-yellow-400' : 'text-green-400'
                         }`}>
-                          {session.violations}/3
+                          {violationCount}/3
                         </span>
                       </div>
 
-                      {session.violations === 0 ? (
+                      {violationCount === 0 ? (
                         <p className="text-sm text-green-400">Tidak ada pelanggaran terdeteksi</p>
                       ) : (
                         <div className="space-y-2">
@@ -309,7 +324,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
                     </div>
 
                     <div className="text-sm text-blue-400">
-                      Rekaman Suara: {Object.keys(session).filter(key => key.startsWith('voiceRecording_')).length}
+                      Rekaman Suara: {Object.keys(session).filter((key: string) => key.startsWith('voiceRecording_')).length}
                     </div>
                   </div>
                 </div>
