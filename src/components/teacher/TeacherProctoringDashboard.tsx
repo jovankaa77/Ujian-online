@@ -1,51 +1,37 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, getDocs, query, limit, startAfter, orderBy, DocumentSnapshot } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
-import Modal from '../ui/Modal';
+
+interface ViolationInfo {
+  timestamp: string;
+  violationType: string;
+}
 
 interface Session {
   id: string;
   studentInfo: {
     name: string;
     nim: string;
+    major?: string;
+    className?: string;
   };
   status: string;
   violations: number;
-  violationSnapshot_1?: {
-    imageData: string;
-    timestamp: string;
-    violationType: string;
-  };
-  violationSnapshot_2?: {
-    imageData: string;
-    timestamp: string;
-    violationType: string;
-  };
-  violationSnapshot_3?: {
-    imageData: string;
-    timestamp: string;
-    violationType: string;
-  };
+  violationSnapshot_1?: ViolationInfo;
+  violationSnapshot_2?: ViolationInfo;
+  violationSnapshot_3?: ViolationInfo;
 }
 
 interface TeacherProctoringDashboardProps {
-  navigateTo: (page: string, data?: any) => void;
   navigateBack: () => void;
   appState: any;
 }
 
-const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({ navigateTo, navigateBack, appState }) => {
-  const { exam, parentExam } = appState;
+const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({ navigateBack, appState }) => {
+  const { exam } = appState;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredSessions, setFilteredSessions] = useState<Session[]>([]);
-  const [selectedSnapshot, setSelectedSnapshot] = useState<{
-    imageData: string;
-    timestamp: string;
-    violationType: string;
-    studentName: string;
-    violationNumber: number;
-  } | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
@@ -139,12 +125,27 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
     }
   }, [sessions, searchTerm]);
 
-  const viewSnapshot = (snapshot: any, studentName: string, violationNumber: number) => {
-    setSelectedSnapshot({
-      ...snapshot,
-      studentName,
-      violationNumber
-    });
+  const getViolationsList = (session: Session): ViolationInfo[] => {
+    const violations: ViolationInfo[] = [];
+    if (session.violationSnapshot_1) violations.push(session.violationSnapshot_1);
+    if (session.violationSnapshot_2) violations.push(session.violationSnapshot_2);
+    if (session.violationSnapshot_3) violations.push(session.violationSnapshot_3);
+    return violations;
+  };
+
+  const formatViolationType = (type: string): string => {
+    const typeMap: Record<string, string> = {
+      'tab_switch': 'Pindah Tab',
+      'focus_lost': 'Keluar dari Window',
+      'fullscreen_exit': 'Keluar Fullscreen',
+      'keyboard_shortcut': 'Shortcut Keyboard Terlarang',
+      'copy_paste': 'Copy/Paste Terdeteksi',
+      'devtools': 'Developer Tools Dibuka',
+      'extension_detected': 'Ekstensi Terlarang Terdeteksi',
+      'screenshot_attempt': 'Percobaan Screenshot',
+      'right_click': 'Klik Kanan Terdeteksi'
+    };
+    return typeMap[type] || type;
   };
 
   if (!exam) {
@@ -153,30 +154,6 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
 
   return (
     <div>
-      <Modal 
-        isOpen={!!selectedSnapshot} 
-        title={`Foto Pelanggaran ${selectedSnapshot?.violationNumber} - ${selectedSnapshot?.studentName}`}
-        onCancel={() => setSelectedSnapshot(null)}
-        cancelText="Tutup"
-      >
-        {selectedSnapshot && (
-          <div className="text-center">
-            <img src={selectedSnapshot.imageData} alt="Violation Snapshot" className="w-full max-w-md mx-auto rounded-lg mb-4" />
-            <div className="bg-gray-700 p-3 rounded-md text-left">
-              <p className="text-sm text-gray-300 mb-1">
-                <span className="font-bold text-red-400">Jenis Pelanggaran:</span> {selectedSnapshot.violationType}
-              </p>
-              <p className="text-sm text-gray-300 mb-1">
-                <span className="font-bold text-blue-400">Waktu:</span> {new Date(selectedSnapshot.timestamp).toLocaleString('id-ID')}
-              </p>
-              <p className="text-sm text-gray-300">
-                <span className="font-bold text-yellow-400">Pelanggaran ke:</span> {selectedSnapshot.violationNumber}
-              </p>
-            </div>
-          </div>
-        )}
-      </Modal>
-      
       <button 
         onClick={handleBackNavigation} 
         className="mb-6 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg"
@@ -184,15 +161,15 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         &larr; Kembali
       </button>
       
-      <h2 className="text-3xl font-bold">Snapshot Pelanggaran</h2>
-      <p className="text-lg text-indigo-400 mb-6">{exam.name} ({exam.code}) - Foto diambil saat pelanggaran terdeteksi</p>
+      <h2 className="text-3xl font-bold">Awasi Ujian</h2>
+      <p className="text-lg text-blue-400 mb-6">{exam.name} ({exam.code}) - Monitoring pelanggaran siswa</p>
       
       {/* Search Bar */}
       <div className="mb-6 bg-gray-800 p-4 rounded-lg shadow-lg">
         <div className="flex items-center space-x-4">
           <div className="flex-grow">
             <label htmlFor="search" className="block text-sm font-medium text-gray-300 mb-2">
-              🔍 Cari Siswa (Nama, NIM, Kelas, atau Jurusan)
+              Cari Siswa (Nama, NIM, Kelas, atau Jurusan)
             </label>
             <input
               id="search"
@@ -200,7 +177,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Ketik nama, NIM, kelas, atau jurusan siswa..."
-              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
           {searchTerm && (
@@ -216,7 +193,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
             disabled={isLoadingMore}
             className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-blue-400"
           >
-            {isLoadingMore ? '🔄' : '🔄'} Refresh
+            Refresh
           </button>
         </div>
         {searchTerm && (
@@ -231,7 +208,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         )}
         {hasMoreData && (
           <div className="mt-3 text-sm text-yellow-400">
-            📄 Menampilkan {sessions.length} siswa (Halaman {currentPage}) - Ada data lainnya
+            Menampilkan {sessions.length} siswa (Halaman {currentPage}) - Ada data lainnya
           </div>
         )}
       </div>
@@ -242,13 +219,13 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         </p>
       ) : filteredSessions.length === 0 ? (
         <div className="text-center mt-8 bg-gray-800 p-6 rounded-lg">
-          <p className="text-yellow-400 text-lg mb-2">🔍 Tidak ada hasil</p>
+          <p className="text-yellow-400 text-lg mb-2">Tidak ada hasil</p>
           <p className="text-gray-400">
             Tidak ditemukan siswa dengan nama, NIM, kelas, atau jurusan "{searchTerm}"
           </p>
           <button
             onClick={() => setSearchTerm('')}
-            className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg"
+            className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
           >
             Tampilkan Semua Siswa
           </button>
@@ -256,124 +233,88 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredSessions.map(session => (
-              <div 
-                key={session.id} 
-                className={`bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 ${
-                  session.violations > 0 
-                    ? 'border-yellow-500' 
-                    : 'border-gray-700'
-                } ${
-                  session.status === 'disqualified' 
-                    ? 'border-red-600' 
-                    : ''
-                }`}
-              >
-                <div className="w-full aspect-video bg-gray-900 relative">
-                  {session.violations > 0 ? (
-                    <div className="w-full h-full relative">
-                      {/* Show latest violation photo as background */}
-                      {(session.violationSnapshot_3 || session.violationSnapshot_2 || session.violationSnapshot_1) && (
-                        <img 
-                          src={(session.violationSnapshot_3 || session.violationSnapshot_2 || session.violationSnapshot_1)?.imageData} 
-                          alt="Latest Violation" 
-                          className="w-full h-full object-cover"
-                        />
-                      )}
-                      {/* Overlay with violation info */}
-                      <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                        <div className="text-center p-4">
-                          <div className="text-yellow-400 mb-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                          </div>
-                          <p className="text-sm text-yellow-400 font-bold">⚠️ {session.violations} Pelanggaran!</p>
-                          <p className="text-xs text-gray-300">Foto Pelanggaran Terdeteksi</p>
-                        </div>
+            {filteredSessions.map(session => {
+              const violationsList = getViolationsList(session);
+              return (
+                <div
+                  key={session.id}
+                  className={`bg-gray-800 rounded-lg shadow-lg overflow-hidden border-2 ${
+                    session.status === 'disqualified'
+                      ? 'border-red-600'
+                      : session.violations > 0
+                      ? 'border-yellow-500'
+                      : 'border-gray-700'
+                  }`}
+                >
+                  <div className="p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h4 className="font-bold text-lg">{session.studentInfo.name}</h4>
+                        <p className="text-sm text-gray-400">{session.studentInfo.nim}</p>
                       </div>
+                      <span
+                        className={`px-3 py-1 text-xs font-bold rounded-full ${
+                          session.status === 'started'
+                            ? 'bg-blue-600'
+                            : session.status === 'finished'
+                            ? 'bg-green-600'
+                            : 'bg-red-600'
+                        }`}
+                      >
+                        {session.status === 'started' ? 'Sedang Ujian' : session.status === 'finished' ? 'Selesai' : 'Diskualifikasi'}
+                      </span>
                     </div>
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <div className="text-center p-4">
-                        <div className="text-green-400 mb-2">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </div>
-                        <p className="text-sm text-green-400 font-bold">✅ Tidak Ada Pelanggaran</p>
-                        <p className="text-xs text-gray-400">Siswa mengerjakan dengan baik</p>
+
+                    <div className="space-y-1 mb-3">
+                      <p className="text-xs text-gray-500">
+                        Jurusan: {session.studentInfo.major || 'Tidak tersedia'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Kelas: {session.studentInfo.className || 'Tidak tersedia'}
+                      </p>
+                    </div>
+
+                    <div className={`p-3 rounded-lg mb-3 ${
+                      session.violations > 0 ? 'bg-yellow-900/30' : 'bg-green-900/30'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-semibold text-sm">Jumlah Pelanggaran</span>
+                        <span className={`text-xl font-bold ${
+                          session.violations >= 3 ? 'text-red-400' :
+                          session.violations > 0 ? 'text-yellow-400' : 'text-green-400'
+                        }`}>
+                          {session.violations}/3
+                        </span>
                       </div>
-                    </div>
-                  )}
-                </div>
-                <div className="p-4">
-                  <h4 className="font-bold text-lg">{session.studentInfo.name}</h4>
-                  <p className="text-sm text-gray-400">{session.studentInfo.nim}</p>
-                  <div className="mt-1 space-y-1">
-                    <p className="text-xs text-gray-500">
-                      📚 {session.studentInfo.major || 'Jurusan tidak tersedia'}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      🏫 {session.studentInfo.className || 'Kelas tidak tersedia'}
-                    </p>
-                  </div>
-                  <div className="mt-3 flex justify-between items-center">
-                    <span 
-                      className={`px-3 py-1 text-xs font-bold rounded-full ${
-                        session.status === 'started' 
-                          ? 'bg-blue-600' 
-                          : session.status === 'finished' 
-                          ? 'bg-green-600' 
-                          : 'bg-red-600'
-                      }`}
-                    >
-                      {session.status}
-                    </span>
-                    <span 
-                      className={`font-bold text-lg ${
-                        session.violations > 0 ? 'text-yellow-400' : ''
-                      }`}
-                    >
-                      Jumlah Pelanggaran: {session.violations}/3
-                    </span>
-                  </div>
-                  <div className="mt-2 flex justify-between items-center">
-                    <span className="text-sm text-purple-400">
-                      🎤 Human Voice: {Object.keys(session).filter(key => key.startsWith('voiceRecording_')).length}
-                    </span>
-                  </div>
-                  {session.violations > 0 && (
-                    <div className="mt-3 grid grid-cols-1 gap-1">
-                      {session.violationSnapshot_1 && (
-                        <button 
-                          onClick={() => viewSnapshot(session.violationSnapshot_1!, session.studentInfo.name, 1)}
-                          className="w-full bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-bold py-2 px-2 rounded flex items-center justify-center"
-                        >
-                          📷 Foto Pelanggaran 1
-                        </button>
-                      )}
-                      {session.violationSnapshot_2 && (
-                        <button 
-                          onClick={() => viewSnapshot(session.violationSnapshot_2!, session.studentInfo.name, 2)}
-                          className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-2 px-2 rounded flex items-center justify-center"
-                        >
-                          📷 Foto Pelanggaran 2
-                        </button>
-                      )}
-                      {session.violationSnapshot_3 && (
-                        <button 
-                          onClick={() => viewSnapshot(session.violationSnapshot_3!, session.studentInfo.name, 3)}
-                          className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-2 rounded flex items-center justify-center"
-                        >
-                          📷 Foto Pelanggaran 3
-                        </button>
+
+                      {session.violations === 0 ? (
+                        <p className="text-sm text-green-400">Tidak ada pelanggaran terdeteksi</p>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-gray-400 font-medium">Daftar Pelanggaran:</p>
+                          {violationsList.map((violation, index) => (
+                            <div key={index} className="bg-gray-800 p-2 rounded text-xs">
+                              <div className="flex justify-between items-center">
+                                <span className="text-yellow-400 font-medium">
+                                  #{index + 1} {formatViolationType(violation.violationType)}
+                                </span>
+                              </div>
+                              <p className="text-gray-500 mt-1">
+                                {new Date(violation.timestamp).toLocaleString('id-ID')}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-                  )}
+
+                    <div className="text-sm text-blue-400">
+                      Rekaman Suara: {Object.keys(session).filter(key => key.startsWith('voiceRecording_')).length}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           
           {/* Pagination Controls */}
@@ -385,7 +326,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
               <button
                 onClick={() => loadSessions(false)}
                 disabled={isLoadingMore}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg disabled:bg-indigo-400 flex items-center mx-auto"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg disabled:bg-blue-400 flex items-center mx-auto"
               >
                 {isLoadingMore ? (
                   <>
@@ -394,7 +335,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
                   </>
                 ) : (
                   <>
-                    📄 Muat Lebih Banyak Siswa ({SESSIONS_PER_PAGE} siswa)
+                    Muat Lebih Banyak Siswa ({SESSIONS_PER_PAGE} siswa)
                   </>
                 )}
               </button>
