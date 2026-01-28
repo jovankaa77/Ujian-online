@@ -50,8 +50,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [vadInstance, setVadInstance] = useState<MicVAD | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const isRecordingAudioRef = useRef(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioRecordingCount, setAudioRecordingCount] = useState(0);
+  const audioRecordingCountRef = useRef(0);
   const [vadError, setVadError] = useState<string | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const speechStartTimeRef = useRef<number | null>(null);
@@ -103,34 +105,34 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         const vad = await (window as any).vad.MicVAD.new({
           stream: stream,
           onSpeechStart: () => {
-            if (audioRecordingCount >= 10) {
-              console.log("🎤 Max recordings reached (10), ignoring speech");
-            } else {
-              speechStartTimeRef.current = Date.now();
-            
-              // Start recording after 1 second of continuous speech
-              speechDetectionTimeoutRef.current = setTimeout(() => {
-                if (speechStartTimeRef.current) {
-                  console.log("🎤 1 second of speech detected, starting recording...");
-                  startAudioRecording(stream);
-                }
-              }, 1000); // 1 second delay
+            if (audioRecordingCountRef.current >= 10) {
+              console.log("Max recordings reached (10), ignoring speech");
+              return;
             }
+
+            if (isRecordingAudioRef.current) {
+              console.log("Already recording, ignoring new speech start");
+              return;
+            }
+
+            speechStartTimeRef.current = Date.now();
+
+            // Start recording after 1 second of continuous speech
+            speechDetectionTimeoutRef.current = setTimeout(() => {
+              if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudioRef.current) {
+                console.log("1 second of speech detected, starting recording...");
+                startAudioRecording(stream);
+              }
+            }, 1000);
           },
           onSpeechEnd: () => {
-            console.log("🔇 Speech ended, stopping recording if active");
+            console.log("Speech ended");
             speechStartTimeRef.current = null;
-            
+
             // Clear the detection timeout if speech ends before 1 second
             if (speechDetectionTimeoutRef.current) {
               clearTimeout(speechDetectionTimeoutRef.current);
               speechDetectionTimeoutRef.current = null;
-            }
-            
-            // Stop recording if currently recording
-            if (isRecordingAudio && mediaRecorder && mediaRecorder.state === 'recording') {
-              console.log("🛑 Stopping recording due to speech end");
-              mediaRecorder.stop();
             }
           },
           onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
@@ -254,37 +256,54 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   }, []);
 
   const startAudioRecording = (stream: MediaStream) => {
-    if (isRecordingAudio || !stream || audioRecordingCount >= 10) {
-      console.log("⚠️ Already recording, no stream available, or max recordings reached (10)");
+    if (isRecordingAudioRef.current) {
+      console.log("Already recording, skipping");
       return;
     }
-    
+
+    if (audioRecordingCountRef.current >= 10) {
+      console.log("Max recordings reached (10), skipping");
+      return;
+    }
+
+    if (!stream || !stream.active) {
+      console.log("Stream not available or inactive");
+      return;
+    }
+
     try {
+      isRecordingAudioRef.current = true;
       setIsRecordingAudio(true);
       audioChunksRef.current = [];
-      
+
       const recorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm;codecs=opus'
       });
-      
+
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
-      
+
       recorder.onstop = async () => {
-        console.log("🎵 Audio recording stopped, processing...");
-        
-        if (audioChunksRef.current.length > 0) {
+        console.log("Audio recording stopped, processing...");
+
+        if (audioChunksRef.current.length > 0 && audioRecordingCountRef.current < 10) {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          
-          // Convert to base64
+
           const reader = new FileReader();
           reader.onloadend = async () => {
+            if (audioRecordingCountRef.current >= 10) {
+              console.log("Max recordings reached during processing, discarding");
+              isRecordingAudioRef.current = false;
+              setIsRecordingAudio(false);
+              setMediaRecorder(null);
+              return;
+            }
+
             const base64Audio = reader.result as string;
-            
-            // Save to Firestore
+
             const audioData = {
               [`voiceRecording_${Date.now()}`]: {
                 audioData: base64Audio,
@@ -294,38 +313,54 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                 studentName: studentInfo.name
               }
             };
-            
+
             try {
               await updateDoc(sessionDocRef, audioData);
-              setAudioRecordingCount(prev => prev + 1);
-              console.log("✅ Audio recording saved to Firestore");
+              setAudioRecordingCount(prev => {
+                const newCount = Math.min(prev + 1, 10);
+                audioRecordingCountRef.current = newCount;
+                console.log(`Audio recording saved. Count: ${newCount}/10`);
+                return newCount;
+              });
             } catch (error) {
-              console.error("❌ Failed to save audio recording:", error);
+              console.error("Failed to save audio recording:", error);
             }
+
+            isRecordingAudioRef.current = false;
+            setIsRecordingAudio(false);
+            setMediaRecorder(null);
           };
-          
+
           reader.readAsDataURL(audioBlob);
+        } else {
+          isRecordingAudioRef.current = false;
+          setIsRecordingAudio(false);
+          setMediaRecorder(null);
         }
-        
-        setIsRecordingAudio(false);
-        setMediaRecorder(null);
       };
-      
+
       setMediaRecorder(recorder);
       recorder.start();
-      
-      // Stop recording after 4 seconds
+
+      // Stop recording after exactly 4 seconds
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+      }
+
       recordingTimeoutRef.current = setTimeout(() => {
-        if (recorder.state === 'recording') {
+        if (recorder && recorder.state === 'recording') {
+          console.log("4 seconds elapsed, stopping recording");
           recorder.stop();
         }
       }, 4000);
-      
-      console.log("🔴 Started 4-second audio recording");
-      
+
+      console.log("Started 4-second audio recording");
+
     } catch (error) {
-      console.error("❌ Failed to start audio recording:", error);
+      console.error("Failed to start audio recording:", error);
+      isRecordingAudioRef.current = false;
       setIsRecordingAudio(false);
+      setMediaRecorder(null);
     }
   };
 
@@ -352,6 +387,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       
       // Reset states
       setVadError(null);
+      isRecordingAudioRef.current = false;
       setIsRecordingAudio(false);
       setMediaRecorder(null);
       
@@ -378,11 +414,35 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       const vad = await (window as any).vad.MicVAD.new({
         stream: stream,
         onSpeechStart: () => {
-          console.log("🎤 Speech detected, starting recording...");
-          startAudioRecording(stream);
+          if (audioRecordingCountRef.current >= 10) {
+            console.log("Max recordings reached (10), ignoring speech");
+            return;
+          }
+
+          if (isRecordingAudio) {
+            console.log("Already recording, ignoring new speech start");
+            return;
+          }
+
+          speechStartTimeRef.current = Date.now();
+
+          // Start recording after 1 second of continuous speech
+          speechDetectionTimeoutRef.current = setTimeout(() => {
+            if (speechStartTimeRef.current && audioRecordingCountRef.current < 10 && !isRecordingAudio) {
+              console.log("1 second of speech detected, starting recording...");
+              startAudioRecording(stream);
+            }
+          }, 1000);
         },
         onSpeechEnd: () => {
-          console.log("🔇 Speech ended");
+          console.log("Speech ended");
+          speechStartTimeRef.current = null;
+
+          // Clear the detection timeout if speech ends before 1 second
+          if (speechDetectionTimeoutRef.current) {
+            clearTimeout(speechDetectionTimeoutRef.current);
+            speechDetectionTimeoutRef.current = null;
+          }
         },
         onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
         baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.27/dist/"
