@@ -1729,10 +1729,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                 {Math.floor((timeLeft % 3600) / 60).toString().padStart(2, '0')}:
                 {(timeLeft % 60).toString().padStart(2, '0')}
               </div>
-              <div className="flex justify-center space-x-4 text-sm">
-                <div className="text-red-500">Pelanggaran: {violations}/3</div>
-                <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
-              </div>
             </div>
           </div>
           <div className="flex justify-between items-center">
