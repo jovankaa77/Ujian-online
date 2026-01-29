@@ -1732,7 +1732,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               <div className="flex justify-center space-x-4 text-sm">
                 <div className="text-red-500">Pelanggaran: {violations}/3</div>
                 <div className="text-blue-400">📸 Foto Absen: {attendancePhotoCount}</div>
-                <div className="text-purple-400">🎤 Suara Manusia: {audioRecordingCount}/10</div>
               </div>
             </div>
           </div>
