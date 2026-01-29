@@ -1818,10 +1818,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               {q.type === 'livecode' && (() => {
                 const currentCode = liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || '');
                 const showTemplate = !currentCode.trim();
-                const displayCode = showTemplate ? CODE_TEMPLATES[q.language || 'javascript'] : currentCode;
+                const displayCode = showTemplate ? CODE_TEMPLATES[q.language || 'php'] : currentCode;
 
                 if (showTemplate && liveCodeDrafts[q.id] === undefined) {
-                  setTimeout(() => handleLiveCodeDraftChange(q.id, CODE_TEMPLATES[q.language || 'javascript']), 0);
+                  setTimeout(() => handleLiveCodeDraftChange(q.id, CODE_TEMPLATES[q.language || 'php']), 0);
                 }
 
                 return (
@@ -1829,11 +1829,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded">
-                        {LANGUAGE_LABELS[q.language || 'javascript']}
+                        {LANGUAGE_LABELS[q.language || 'php']}
                       </span>
                       <button
                         onClick={() => {
-                          const template = CODE_TEMPLATES[q.language || 'javascript'] || '';
+                          const template = CODE_TEMPLATES[q.language || 'php'] || '';
                           handleLiveCodeDraftChange(q.id, template);
                         }}
                         className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded"
@@ -1856,18 +1856,51 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                     </div>
                   </div>
 
-                  <div className="relative">
-                    <div className="absolute top-0 left-0 right-0 bottom-0 overflow-auto bg-gray-950 rounded-md border border-gray-600 p-4 font-mono text-sm pointer-events-none whitespace-pre-wrap" style={{ lineHeight: '1.5' }}>
-                      {highlightCode(displayCode, q.language || 'javascript')}
+                  <div className="relative rounded-lg overflow-hidden border border-gray-500 shadow-lg">
+                    <div className="flex">
+                      <div className="bg-slate-800 text-gray-500 text-right pr-3 pt-4 pb-4 select-none font-mono text-sm border-r border-gray-600" style={{ lineHeight: '1.5', minWidth: '3rem' }}>
+                        {displayCode.split('\n').map((_, i) => (
+                          <div key={i} className="px-2">{i + 1}</div>
+                        ))}
+                      </div>
+                      <div className="flex-1 relative">
+                        <div
+                          className="absolute top-0 left-0 right-0 bottom-0 overflow-auto p-4 font-mono text-sm pointer-events-none whitespace-pre-wrap"
+                          style={{
+                            lineHeight: '1.5',
+                            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
+                          }}
+                        >
+                          {highlightCode(displayCode, q.language || 'php')}
+                        </div>
+                        <textarea
+                          value={displayCode}
+                          onChange={(e) => handleLiveCodeDraftChange(q.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Tab') {
+                              e.preventDefault();
+                              const target = e.target as HTMLTextAreaElement;
+                              const start = target.selectionStart;
+                              const end = target.selectionEnd;
+                              const value = target.value;
+                              const newValue = value.substring(0, start) + '    ' + value.substring(end);
+                              handleLiveCodeDraftChange(q.id, newValue);
+                              setTimeout(() => {
+                                target.selectionStart = target.selectionEnd = start + 4;
+                              }, 0);
+                            }
+                          }}
+                          placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'php']} Anda di sini...`}
+                          className="w-full p-4 bg-transparent rounded-md h-72 font-mono text-sm text-transparent resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          spellCheck={false}
+                          style={{
+                            lineHeight: '1.5',
+                            caretColor: '#22d3ee',
+                            caretShape: 'bar'
+                          }}
+                        />
+                      </div>
                     </div>
-                    <textarea
-                      value={displayCode}
-                      onChange={(e) => handleLiveCodeDraftChange(q.id, e.target.value)}
-                      placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'javascript']} Anda di sini...`}
-                      className="w-full p-4 pl-12 bg-transparent rounded-md border border-gray-600 h-64 font-mono text-sm text-transparent caret-white resize-none"
-                      spellCheck={false}
-                      style={{ lineHeight: '1.5' }}
-                    />
                   </div>
 
                   <div className="flex gap-2 flex-wrap">
@@ -1892,7 +1925,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                       </button>
                     ) : (
                       <button
-                        onClick={() => runLiveCode(q.id, q.language || 'javascript')}
+                        onClick={() => runLiveCode(q.id, q.language || 'php')}
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
                       >
                         Run Code

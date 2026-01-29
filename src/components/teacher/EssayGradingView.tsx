@@ -290,11 +290,26 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                   )}
 
                   <div className="mt-3">
-                    <p className="text-sm text-gray-400 mb-1">Kode Siswa:</p>
+                    <p className="text-sm text-gray-400 mb-2">Kode Siswa:</p>
                     {session.answers[q.id] ? (
-                      <pre className="p-4 bg-gray-900 rounded-md text-sm font-mono overflow-x-auto whitespace-pre-wrap">
-                        {session.answers[q.id]}
-                      </pre>
+                      <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
+                        <div className="flex">
+                          <div className="bg-slate-800 text-gray-500 text-right pr-3 py-4 select-none font-mono text-sm border-r border-gray-600" style={{ lineHeight: '1.5', minWidth: '3rem' }}>
+                            {session.answers[q.id].split('\n').map((_: string, i: number) => (
+                              <div key={i} className="px-2">{i + 1}</div>
+                            ))}
+                          </div>
+                          <pre
+                            className="flex-1 p-4 text-sm font-mono overflow-x-auto whitespace-pre-wrap text-gray-200"
+                            style={{
+                              lineHeight: '1.5',
+                              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
+                            }}
+                          >
+                            {session.answers[q.id]}
+                          </pre>
+                        </div>
+                      </div>
                     ) : (
                       <p className="p-4 bg-gray-900 rounded-md text-gray-500">(Tidak dijawab)</p>
                     )}
