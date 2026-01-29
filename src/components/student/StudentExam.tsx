@@ -9,7 +9,9 @@ interface Question {
   text: string;
   type: 'mc' | 'essay';
   options?: string[];
+  optionImages?: (string | null)[];
   correctAnswer?: number;
+  image?: string | null;
 }
 
 interface StudentExamProps {
@@ -1395,37 +1397,58 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         <div className="mt-8 space-y-6">
           {questions.map((q, index) => (
             <div key={q.id} className="bg-gray-800 p-6 rounded-lg">
-              <p className="font-semibold text-lg mb-4">{index + 1}. {q.text}</p>
-              
+              <p className="font-semibold text-lg mb-2">{index + 1}. {q.text || '(Soal bergambar)'}</p>
+              {q.image && (
+                <div className="mb-4">
+                  <img
+                    src={q.image}
+                    alt="Gambar soal"
+                    className="max-w-full max-h-80 rounded-md border border-gray-600"
+                  />
+                </div>
+              )}
+
               {q.type === 'mc' && q.options && (
                 <div className="space-y-3">
                   {q.options.map((opt, i) => (
-                    <label 
-                      key={i} 
+                    <label
+                      key={i}
                       className={`block p-3 rounded-md cursor-pointer transition-colors ${
-                        answers[q.id] === i 
-                          ? 'bg-indigo-600' 
+                        answers[q.id] === i
+                          ? 'bg-blue-600'
                           : 'bg-gray-700 hover:bg-gray-600'
                       }`}
                     >
-                      <input 
-                        type="radio" 
-                        name={q.id} 
-                        checked={answers[q.id] === i} 
-                        onChange={() => handleAnswerChange(q.id, i)} 
-                        className="hidden" 
+                      <input
+                        type="radio"
+                        name={q.id}
+                        checked={answers[q.id] === i}
+                        onChange={() => handleAnswerChange(q.id, i)}
+                        className="hidden"
                       />
-                      <span className="ml-2">{String.fromCharCode(65 + i)}. {opt}</span>
+                      <div className="flex items-start gap-2">
+                        <span className="font-medium">{String.fromCharCode(65 + i)}.</span>
+                        <div className="flex-1">
+                          {opt && <span>{opt}</span>}
+                          {q.optionImages?.[i] && (
+                            <img
+                              src={q.optionImages[i]!}
+                              alt={`Opsi ${String.fromCharCode(65 + i)}`}
+                              className="mt-2 max-h-40 rounded border border-gray-500"
+                            />
+                          )}
+                        </div>
+                      </div>
                     </label>
                   ))}
                 </div>
               )}
-              
+
               {q.type === 'essay' && (
-                <textarea 
-                  value={answers[q.id] || ''} 
-                  onChange={(e) => handleAnswerChange(q.id, e.target.value)} 
-                  placeholder="Ketik jawaban esai Anda di sini..." 
+                <textarea
+                  value={answers[q.id] || ''}
+                  onChange={(e) => handleAnswerChange(q.id, e.target.value)}
+                  placeholder="Ketik jawaban esai Anda di sini..."
                   className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 h-32"
                 />
               )}
