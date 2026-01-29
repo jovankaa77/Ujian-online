@@ -5,11 +5,170 @@ import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  html: 'HTML',
   javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',
   python: 'Python'
+};
+
+const CODE_TEMPLATES: Record<string, string> = {
+  javascript: `// JavaScript Hello World
+console.log("Hello, World!");`,
+  php: `<?php
+// PHP Hello World
+echo "Hello, World!";
+?>`,
+  cpp: `// C++ Hello World
+#include <iostream>
+using namespace std;
+
+int main() {
+    cout << "Hello, World!" << endl;
+    return 0;
+}`,
+  python: `# Python Hello World
+print("Hello, World!")`
+};
+
+const SYNTAX_COLORS: Record<string, Record<string, string>> = {
+  javascript: {
+    keywords: 'text-purple-400',
+    strings: 'text-green-400',
+    comments: 'text-gray-500',
+    numbers: 'text-orange-400',
+    functions: 'text-yellow-400',
+    operators: 'text-cyan-400'
+  },
+  php: {
+    keywords: 'text-purple-400',
+    strings: 'text-green-400',
+    comments: 'text-gray-500',
+    numbers: 'text-orange-400',
+    functions: 'text-yellow-400',
+    variables: 'text-red-400'
+  },
+  cpp: {
+    keywords: 'text-purple-400',
+    strings: 'text-green-400',
+    comments: 'text-gray-500',
+    numbers: 'text-orange-400',
+    preprocessor: 'text-pink-400',
+    types: 'text-cyan-400'
+  },
+  python: {
+    keywords: 'text-purple-400',
+    strings: 'text-green-400',
+    comments: 'text-gray-500',
+    numbers: 'text-orange-400',
+    functions: 'text-yellow-400',
+    decorators: 'text-pink-400'
+  }
+};
+
+const highlightCode = (code: string, language: string): JSX.Element[] => {
+  const lines = code.split('\n');
+
+  const highlightLine = (line: string, lang: string): JSX.Element => {
+    let highlighted = line;
+    const elements: JSX.Element[] = [];
+    let key = 0;
+
+    const patterns: { regex: RegExp; className: string }[] = [];
+
+    if (lang === 'javascript') {
+      patterns.push(
+        { regex: /(\/\/.*$)/gm, className: 'text-gray-500 italic' },
+        { regex: /(["'`])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
+        { regex: /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|try|catch|throw|new)\b/g, className: 'text-purple-400 font-semibold' },
+        { regex: /\b(console|window|document|Math|Array|Object|String|Number|Boolean|Promise)\b/g, className: 'text-yellow-400' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' },
+        { regex: /(\+|-|\*|\/|=|===|!==|==|!=|<|>|<=|>=|&&|\|\|)/g, className: 'text-cyan-400' }
+      );
+    } else if (lang === 'php') {
+      patterns.push(
+        { regex: /(\/\/.*$|#.*$)/gm, className: 'text-gray-500 italic' },
+        { regex: /(["'])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
+        { regex: /(<\?php|\?>)/g, className: 'text-red-500 font-bold' },
+        { regex: /\b(echo|print|function|return|if|else|elseif|for|foreach|while|class|public|private|protected|static|new|use|namespace|require|include)\b/g, className: 'text-purple-400 font-semibold' },
+        { regex: /(\$[a-zA-Z_][a-zA-Z0-9_]*)/g, className: 'text-red-400' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' }
+      );
+    } else if (lang === 'cpp') {
+      patterns.push(
+        { regex: /(\/\/.*$)/gm, className: 'text-gray-500 italic' },
+        { regex: /(["'])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
+        { regex: /(#include|#define|#ifdef|#ifndef|#endif|#pragma)/g, className: 'text-pink-400' },
+        { regex: /(<[a-zA-Z]+>)/g, className: 'text-green-300' },
+        { regex: /\b(int|char|float|double|void|bool|string|auto|const|static|class|struct|public|private|protected|return|if|else|for|while|do|switch|case|break|continue|new|delete|using|namespace|template|typename)\b/g, className: 'text-purple-400 font-semibold' },
+        { regex: /\b(cout|cin|endl|std|vector|map|set|pair)\b/g, className: 'text-cyan-400' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' }
+      );
+    } else if (lang === 'python') {
+      patterns.push(
+        { regex: /(#.*$)/gm, className: 'text-gray-500 italic' },
+        { regex: /(["'])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
+        { regex: /("""[\s\S]*?"""|'''[\s\S]*?''')/g, className: 'text-green-400' },
+        { regex: /\b(def|class|return|if|elif|else|for|while|try|except|finally|with|as|import|from|lambda|pass|break|continue|and|or|not|in|is|None|True|False|self)\b/g, className: 'text-purple-400 font-semibold' },
+        { regex: /\b(print|input|len|range|str|int|float|list|dict|set|tuple|open|type)\b/g, className: 'text-yellow-400' },
+        { regex: /(@\w+)/g, className: 'text-pink-400' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' }
+      );
+    }
+
+    if (patterns.length === 0) {
+      return <span key={key}>{line}</span>;
+    }
+
+    let lastIndex = 0;
+    const matches: { start: number; end: number; text: string; className: string }[] = [];
+
+    for (const pattern of patterns) {
+      let match;
+      const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
+      while ((match = regex.exec(line)) !== null) {
+        matches.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          text: match[0],
+          className: pattern.className
+        });
+      }
+    }
+
+    matches.sort((a, b) => a.start - b.start);
+
+    const filteredMatches: typeof matches = [];
+    for (const match of matches) {
+      if (filteredMatches.length === 0 || match.start >= filteredMatches[filteredMatches.length - 1].end) {
+        filteredMatches.push(match);
+      }
+    }
+
+    for (const match of filteredMatches) {
+      if (match.start > lastIndex) {
+        elements.push(<span key={key++}>{line.slice(lastIndex, match.start)}</span>);
+      }
+      elements.push(<span key={key++} className={match.className}>{match.text}</span>);
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < line.length) {
+      elements.push(<span key={key++}>{line.slice(lastIndex)}</span>);
+    }
+
+    if (elements.length === 0) {
+      return <span key={0}>{line}</span>;
+    }
+
+    return <>{elements}</>;
+  };
+
+  return lines.map((line, index) => (
+    <div key={index} className="flex">
+      <span className="w-8 text-gray-600 text-right pr-3 select-none flex-shrink-0">{index + 1}</span>
+      <span className="flex-1">{highlightLine(line, language)}</span>
+    </div>
+  ));
 };
 
 interface Question {
@@ -1099,7 +1258,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     }
 
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
-    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Running...', error: false } }));
+    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Compiling and running...', error: false } }));
 
     try {
       let output = '';
@@ -1129,10 +1288,66 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           output = 'Error: ' + e.message;
           hasError = true;
         }
-      } else if (language === 'html') {
-        output = '[HTML Preview]\n' + code.substring(0, 500) + (code.length > 500 ? '...' : '');
       } else if (language === 'python' || language === 'php' || language === 'cpp') {
-        output = `[${LANGUAGE_LABELS[language]}]\nCode akan dijalankan oleh dosen saat penilaian.\n\nPreview kode:\n${code.substring(0, 300)}${code.length > 300 ? '...' : ''}`;
+        const pistonLanguageMap: Record<string, string> = {
+          python: 'python',
+          php: 'php',
+          cpp: 'cpp'
+        };
+
+        const pistonVersionMap: Record<string, string> = {
+          python: '3.10.0',
+          php: '8.2.3',
+          cpp: '10.2.0'
+        };
+
+        try {
+          const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              language: pistonLanguageMap[language],
+              version: pistonVersionMap[language],
+              files: [
+                {
+                  name: language === 'cpp' ? 'main.cpp' : (language === 'php' ? 'main.php' : 'main.py'),
+                  content: code
+                }
+              ],
+              stdin: '',
+              args: [],
+              compile_timeout: 10000,
+              run_timeout: 5000
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const result = await response.json();
+
+          if (result.compile && result.compile.stderr) {
+            output = 'Compilation Error:\n' + result.compile.stderr;
+            hasError = true;
+          } else if (result.run) {
+            if (result.run.stderr) {
+              output = 'Runtime Error:\n' + result.run.stderr;
+              hasError = true;
+            } else if (result.run.stdout) {
+              output = result.run.stdout;
+            } else {
+              output = '(No output)';
+            }
+          } else {
+            output = 'Execution completed with no output';
+          }
+        } catch (e: any) {
+          output = 'Compiler Error: ' + e.message + '\n\nPastikan koneksi internet Anda stabil.';
+          hasError = true;
+        }
       } else {
         output = 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.';
         hasError = true;
@@ -1575,29 +1790,49 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
               {q.type === 'livecode' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded">
-                      {LANGUAGE_LABELS[q.language || 'javascript']}
-                    </span>
-                    {hasUnsavedLiveCode(q.id) && (
-                      <span className="text-sm text-yellow-400 animate-pulse">
-                        * Perubahan belum disimpan
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded">
+                        {LANGUAGE_LABELS[q.language || 'javascript']}
                       </span>
-                    )}
-                    {answers[q.id] && !hasUnsavedLiveCode(q.id) && (
-                      <span className="text-sm text-green-400">
-                        Tersimpan
-                      </span>
-                    )}
+                      <button
+                        onClick={() => {
+                          const template = CODE_TEMPLATES[q.language || 'javascript'] || '';
+                          handleLiveCodeDraftChange(q.id, template);
+                        }}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded"
+                        title="Load Hello World template"
+                      >
+                        Load Template
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hasUnsavedLiveCode(q.id) && (
+                        <span className="text-sm text-yellow-400 animate-pulse">
+                          * Perubahan belum disimpan
+                        </span>
+                      )}
+                      {answers[q.id] && !hasUnsavedLiveCode(q.id) && (
+                        <span className="text-sm text-green-400">
+                          Tersimpan
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <textarea
-                    value={liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || '')}
-                    onChange={(e) => handleLiveCodeDraftChange(q.id, e.target.value)}
-                    placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'javascript']} Anda di sini...`}
-                    className="w-full p-4 bg-gray-900 rounded-md border border-gray-600 h-64 font-mono text-sm"
-                    spellCheck={false}
-                  />
+                  <div className="relative">
+                    <div className="absolute top-0 left-0 right-0 bottom-0 overflow-auto bg-gray-950 rounded-md border border-gray-600 p-4 font-mono text-sm pointer-events-none whitespace-pre-wrap" style={{ lineHeight: '1.5' }}>
+                      {highlightCode(liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || ''), q.language || 'javascript')}
+                    </div>
+                    <textarea
+                      value={liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || '')}
+                      onChange={(e) => handleLiveCodeDraftChange(q.id, e.target.value)}
+                      placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'javascript']} Anda di sini...`}
+                      className="w-full p-4 pl-12 bg-transparent rounded-md border border-gray-600 h-64 font-mono text-sm text-transparent caret-white resize-none"
+                      spellCheck={false}
+                      style={{ lineHeight: '1.5' }}
+                    />
+                  </div>
 
                   <div className="flex gap-2 flex-wrap">
                     <button

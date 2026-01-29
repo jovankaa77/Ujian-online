@@ -14,11 +14,10 @@ interface OptionData {
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 
-const SUPPORTED_LANGUAGES = ['html', 'javascript', 'php', 'cpp', 'python'] as const;
+const SUPPORTED_LANGUAGES = ['javascript', 'php', 'cpp', 'python'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
-  html: 'HTML',
   javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',

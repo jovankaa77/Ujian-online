@@ -1,10 +1,9 @@
 import React, { useState, useRef } from 'react';
 
-const SUPPORTED_LANGUAGES = ['html', 'javascript', 'php', 'cpp', 'python'] as const;
+const SUPPORTED_LANGUAGES = ['javascript', 'php', 'cpp', 'python'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
-  html: 'HTML',
   javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',
