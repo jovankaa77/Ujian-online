@@ -1677,7 +1677,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           📸 Foto Absen: {attendancePhotoCount}
         </div>
         <div className="text-xs text-purple-400 mb-2">
-          🎤 Human Voice: {audioRecordingCount}/10
+          🎤 Human Voice: aktif
         </div>
         
         {isRecordingAudio && (
