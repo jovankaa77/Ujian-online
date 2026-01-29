@@ -6,7 +6,12 @@ import EssayGradingView from './EssayGradingView';
 
 interface Question {
   id: string;
+  text: string;
   type: 'mc' | 'essay';
+  options?: string[];
+  optionImages?: (string | null)[];
+  correctAnswer?: number;
+  image?: string | null;
 }
 
 interface Session {
@@ -16,12 +21,14 @@ interface Session {
     nim: string;
     major: string;
     className: string;
+    fullName?: string;
   };
   status: string;
   violations: number;
   finalScore?: number;
   essayScores?: { [key: string]: number };
   scoreReduction?: number;
+  answers?: { [questionId: string]: number | string };
 }
 
 interface TeacherResultsDashboardProps {
@@ -51,6 +58,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [scoreReduction, setScoreReduction] = useState(0);
   const [isUpdatingScore, setIsUpdatingScore] = useState(false);
   const [scoreError, setScoreError] = useState('');
+  const [historySession, setHistorySession] = useState<Session | null>(null);
 
   const handleBackNavigation = () => {
     navigateBack();
@@ -626,6 +634,189 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
         </div>
       </div>
       
+      {/* Answer History Modal */}
+      {historySession && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-6 border-b border-gray-700">
+              <div>
+                <h3 className="text-xl font-bold">History Pengerjaan</h3>
+                <p className="text-gray-400 text-sm mt-1">
+                  {historySession.studentInfo.name || historySession.studentInfo.fullName} - {historySession.studentInfo.nim}
+                </p>
+              </div>
+              <button
+                onClick={() => setHistorySession(null)}
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {(() => {
+                const mcQuestions = questions.filter(q => q.type === 'mc');
+                const correctAnswers: Question[] = [];
+                const wrongAnswers: Question[] = [];
+                const unanswered: Question[] = [];
+
+                mcQuestions.forEach(q => {
+                  const studentAnswer = historySession.answers?.[q.id];
+                  if (studentAnswer === undefined || studentAnswer === null) {
+                    unanswered.push(q);
+                  } else if (studentAnswer === q.correctAnswer) {
+                    correctAnswers.push(q);
+                  } else {
+                    wrongAnswers.push(q);
+                  }
+                });
+
+                return (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="bg-green-900 border border-green-500 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-green-400">{correctAnswers.length}</div>
+                        <div className="text-green-300 text-sm">Benar</div>
+                      </div>
+                      <div className="bg-red-900 border border-red-500 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-red-400">{wrongAnswers.length}</div>
+                        <div className="text-red-300 text-sm">Salah</div>
+                      </div>
+                      <div className="bg-gray-700 border border-gray-500 p-4 rounded-lg">
+                        <div className="text-3xl font-bold text-gray-400">{unanswered.length}</div>
+                        <div className="text-gray-300 text-sm">Tidak Dijawab</div>
+                      </div>
+                    </div>
+
+                    {correctAnswers.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold text-green-400 mb-3 flex items-center gap-2">
+                          <span className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-sm">V</span>
+                          Jawaban Benar ({correctAnswers.length})
+                        </h4>
+                        <div className="space-y-3">
+                          {correctAnswers.map((q, idx) => {
+                            const qIndex = questions.findIndex(question => question.id === q.id);
+                            const studentAnswer = historySession.answers?.[q.id] as number;
+                            return (
+                              <div key={q.id} className="bg-green-900/30 border border-green-700 p-4 rounded-lg">
+                                <div className="flex items-start gap-3">
+                                  <span className="bg-green-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                    #{qIndex + 1}
+                                  </span>
+                                  <div className="flex-1">
+                                    <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
+                                    {q.image && (
+                                      <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />
+                                    )}
+                                    <div className="text-sm text-green-300">
+                                      Jawaban: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
+                                      {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {wrongAnswers.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold text-red-400 mb-3 flex items-center gap-2">
+                          <span className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-sm">X</span>
+                          Jawaban Salah ({wrongAnswers.length})
+                        </h4>
+                        <div className="space-y-3">
+                          {wrongAnswers.map((q, idx) => {
+                            const qIndex = questions.findIndex(question => question.id === q.id);
+                            const studentAnswer = historySession.answers?.[q.id] as number;
+                            return (
+                              <div key={q.id} className="bg-red-900/30 border border-red-700 p-4 rounded-lg">
+                                <div className="flex items-start gap-3">
+                                  <span className="bg-red-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                    #{qIndex + 1}
+                                  </span>
+                                  <div className="flex-1">
+                                    <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
+                                    {q.image && (
+                                      <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />
+                                    )}
+                                    <div className="text-sm space-y-1">
+                                      <div className="text-red-300">
+                                        Jawaban Siswa: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
+                                        {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
+                                      </div>
+                                      <div className="text-green-300">
+                                        Jawaban Benar: <span className="font-bold">{String.fromCharCode(65 + (q.correctAnswer || 0))}</span>
+                                        {q.options?.[q.correctAnswer || 0] && ` - ${q.options[q.correctAnswer || 0]}`}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {unanswered.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold text-gray-400 mb-3 flex items-center gap-2">
+                          <span className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-sm">-</span>
+                          Tidak Dijawab ({unanswered.length})
+                        </h4>
+                        <div className="space-y-3">
+                          {unanswered.map((q, idx) => {
+                            const qIndex = questions.findIndex(question => question.id === q.id);
+                            return (
+                              <div key={q.id} className="bg-gray-700/50 border border-gray-600 p-4 rounded-lg">
+                                <div className="flex items-start gap-3">
+                                  <span className="bg-gray-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                    #{qIndex + 1}
+                                  </span>
+                                  <div className="flex-1">
+                                    <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
+                                    {q.image && (
+                                      <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />
+                                    )}
+                                    <div className="text-sm text-gray-400">
+                                      Jawaban Benar: <span className="font-bold text-green-400">{String.fromCharCode(65 + (q.correctAnswer || 0))}</span>
+                                      {q.options?.[q.correctAnswer || 0] && ` - ${q.options[q.correctAnswer || 0]}`}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {mcQuestions.length === 0 && (
+                      <div className="text-center text-gray-400 py-8">
+                        Tidak ada soal pilihan ganda dalam ujian ini.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="p-4 border-t border-gray-700 flex justify-end">
+              <button
+                onClick={() => setHistorySession(null)}
+                className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Score Reduction Modal */}
       {editingScoreSession && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
@@ -763,13 +954,14 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
               <th className="p-4">Nilai Essay</th>
               <th className="p-4">Nilai Akhir</th>
               <th className="p-4">Pengurangan</th>
+              <th className="p-4">History</th>
               <th className="p-4">Aksi</th>
             </tr>
           </thead>
           <tbody>
             {filteredSessions.length === 0 ? (
               <tr>
-                <td colSpan={11} className="text-center p-8 text-gray-400">
+                <td colSpan={12} className="text-center p-8 text-gray-400">
                   {sessions.length === 0 
                     ? "Belum ada siswa yang menyelesaikan ujian."
                     : "Tidak ada siswa yang sesuai dengan filter."
@@ -804,24 +996,33 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                   <td className="p-4 font-bold">{calculateTotalScore(session)}</td>
                   <td className="p-4">
                     <span className={`px-2 py-1 text-xs rounded ${
-                      (session.scoreReduction || 0) > 0 
-                        ? 'bg-red-600 text-white' 
+                      (session.scoreReduction || 0) > 0
+                        ? 'bg-red-600 text-white'
                         : 'bg-gray-600 text-gray-300'
                     }`}>
                       -{session.scoreReduction || 0}
                     </span>
                   </td>
                   <td className="p-4">
+                    <button
+                      onClick={() => setHistorySession(session)}
+                      disabled={questions.filter(q => q.type === 'mc').length === 0}
+                      className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold py-1 px-2 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    >
+                      Lihat
+                    </button>
+                  </td>
+                  <td className="p-4">
                     <div className="flex space-x-2">
-                      <button 
-                        onClick={() => setSelectedSession(session)} 
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-2 rounded" 
+                      <button
+                        onClick={() => setSelectedSession(session)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-2 rounded"
                         disabled={questions.filter(q => q.type === 'essay').length === 0}
                       >
                         Nilai Esai
                       </button>
-                      <button 
-                        onClick={() => handleEditScore(session)} 
+                      <button
+                        onClick={() => handleEditScore(session)}
                         className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-1 px-2 rounded"
                       >
                         Edit Nilai
