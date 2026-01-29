@@ -37,7 +37,6 @@ const RISKY_EXTENSIONS = [
   { name: 'OneNote Web Clipper', patterns: ['onenote'], risk: 'medium' as const, description: 'Microsoft note taking tool' },
   
   // Developer tools
-  { name: 'React Developer Tools', patterns: ['react-developer'], risk: 'medium' as const, description: 'Developer tools' },
   { name: 'Vue.js devtools', patterns: ['vue-devtools'], risk: 'medium' as const, description: 'Developer tools' },
   { name: 'Web Developer', patterns: ['web-developer'], risk: 'medium' as const, description: 'Web development tools' },
   
@@ -184,7 +183,6 @@ const detectExtensionsByGlobalObjects = (detectedExtensions: ExtensionInfo[]): v
     { check: () => (window as any).monica, name: 'Monica AI', risk: 'high' as const },
     { check: () => (window as any).chatgpt, name: 'ChatGPT Extension', risk: 'high' as const },
     { check: () => (window as any).google?.translate, name: 'Google Translate', risk: 'high' as const },
-    { check: () => (window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__, name: 'React Developer Tools', risk: 'medium' as const },
     { check: () => (window as any).__VUE_DEVTOOLS_GLOBAL_HOOK__, name: 'Vue.js devtools', risk: 'medium' as const },
   ];
 
