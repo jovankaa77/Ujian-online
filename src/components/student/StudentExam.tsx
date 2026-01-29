@@ -220,6 +220,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
   const [codeMessages, setCodeMessages] = useState<{ [key: string]: { text: string; type: 'success' | 'error' | 'warning' } }>({});
   const [showCancelConfirm, setShowCancelConfirm] = useState<string | null>(null);
+  const [codeAbortControllers, setCodeAbortControllers] = useState<{ [key: string]: AbortController }>({});
+  const jsWorkerRef = useRef<Worker | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showCameraControls, setShowCameraControls] = useState(false);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
@@ -1250,6 +1252,48 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     showCodeMessage(questionId, 'Perubahan dibatalkan', 'warning');
   };
 
+  const DANGEROUS_JS_PATTERNS = [
+    /document\s*\.\s*write\s*\(/i,
+    /document\s*\.\s*writeln\s*\(/i,
+    /document\s*\.\s*open\s*\(/i,
+    /document\s*\.\s*close\s*\(/i,
+    /window\s*\.\s*location/i,
+    /location\s*\.\s*href/i,
+    /location\s*\.\s*replace/i,
+    /location\s*\.\s*assign/i,
+    /window\s*\.\s*open\s*\(/i,
+    /eval\s*\(/i,
+    /innerHTML\s*=/i,
+    /outerHTML\s*=/i
+  ];
+
+  const checkDangerousCode = (code: string): string | null => {
+    for (const pattern of DANGEROUS_JS_PATTERNS) {
+      if (pattern.test(code)) {
+        const match = code.match(pattern);
+        return match ? match[0] : 'dangerous code';
+      }
+    }
+    return null;
+  };
+
+  const stopRunningCode = (questionId: string) => {
+    const controller = codeAbortControllers[questionId];
+    if (controller) {
+      controller.abort();
+    }
+    setRunningCode(prev => ({ ...prev, [questionId]: false }));
+    setCodeOutputs(prev => ({
+      ...prev,
+      [questionId]: { output: 'Execution stopped by user.', error: true }
+    }));
+    setCodeAbortControllers(prev => {
+      const newControllers = { ...prev };
+      delete newControllers[questionId];
+      return newControllers;
+    });
+  };
+
   const runLiveCode = async (questionId: string, language: string) => {
     const code = liveCodeDrafts[questionId] || answers[questionId] || '';
     if (!code.trim()) {
@@ -1257,6 +1301,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       return;
     }
 
+    const abortController = new AbortController();
+    setCodeAbortControllers(prev => ({ ...prev, [questionId]: abortController }));
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
     setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Compiling and running...', error: false } }));
 
@@ -1265,28 +1311,95 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       let hasError = false;
 
       if (language === 'javascript') {
-        try {
-          const logs: string[] = [];
-          const originalLog = console.log;
-          console.log = (...args) => {
-            logs.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-          };
-
-          const result = new Function(code)();
-          console.log = originalLog;
-
-          if (logs.length > 0) {
-            output = logs.join('\n');
-          }
-          if (result !== undefined) {
-            output += (output ? '\n' : '') + 'Return: ' + (typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result));
-          }
-          if (!output) {
-            output = '(No output)';
-          }
-        } catch (e: any) {
-          output = 'Error: ' + e.message;
+        const dangerousPattern = checkDangerousCode(code);
+        if (dangerousPattern) {
+          output = `Error: Kode berbahaya terdeteksi!\n\nKode yang menggunakan "${dangerousPattern}" tidak diperbolehkan karena dapat mengganggu halaman ujian.\n\nGunakan console.log() untuk menampilkan output.`;
           hasError = true;
+        } else {
+          try {
+            const logs: string[] = [];
+            const errors: string[] = [];
+            let timedOut = false;
+
+            const timeoutPromise = new Promise<void>((_, reject) => {
+              setTimeout(() => {
+                timedOut = true;
+                reject(new Error('TIMEOUT: Kode berjalan terlalu lama (>5 detik). Kemungkinan infinite loop.'));
+              }, 5000);
+            });
+
+            const executePromise = new Promise<any>((resolve, reject) => {
+              try {
+                const safeCode = `
+                  "use strict";
+                  const __logs = [];
+                  const __errors = [];
+                  const console = {
+                    log: (...args) => __logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
+                    error: (...args) => __errors.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
+                    warn: (...args) => __logs.push('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
+                    info: (...args) => __logs.push('[INFO] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' '))
+                  };
+                  const document = undefined;
+                  const window = undefined;
+                  const location = undefined;
+                  const alert = undefined;
+                  const confirm = undefined;
+                  const prompt = undefined;
+                  const eval = undefined;
+                  const Function = undefined;
+
+                  let __result;
+                  try {
+                    __result = (function() {
+                      ${code}
+                    })();
+                  } catch(e) {
+                    __errors.push(e.message);
+                  }
+
+                  return { logs: __logs, errors: __errors, result: __result };
+                `;
+
+                const fn = new Function(safeCode);
+                const result = fn();
+                resolve(result);
+              } catch (e: any) {
+                reject(e);
+              }
+            });
+
+            try {
+              const result = await Promise.race([executePromise, timeoutPromise]) as any;
+
+              if (result && result.logs) {
+                logs.push(...result.logs);
+              }
+              if (result && result.errors && result.errors.length > 0) {
+                errors.push(...result.errors);
+              }
+
+              if (logs.length > 0) {
+                output = logs.join('\n');
+              }
+              if (errors.length > 0) {
+                output += (output ? '\n\n' : '') + 'Errors:\n' + errors.join('\n');
+                hasError = true;
+              }
+              if (result && result.result !== undefined) {
+                output += (output ? '\n' : '') + 'Return: ' + (typeof result.result === 'object' ? JSON.stringify(result.result, null, 2) : String(result.result));
+              }
+              if (!output) {
+                output = '(No output)';
+              }
+            } catch (e: any) {
+              output = 'Error: ' + e.message;
+              hasError = true;
+            }
+          } catch (e: any) {
+            output = 'Error: ' + e.message;
+            hasError = true;
+          }
         }
       } else if (language === 'python' || language === 'php' || language === 'cpp') {
         const pistonLanguageMap: Record<string, string> = {
@@ -1320,7 +1433,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               args: [],
               compile_timeout: 10000,
               run_timeout: 5000
-            })
+            }),
+            signal: abortController.signal
           });
 
           if (!response.ok) {
@@ -1341,11 +1455,20 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             } else {
               output = '(No output)';
             }
+
+            if (result.run.signal === 'SIGKILL') {
+              output = 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.';
+              hasError = true;
+            }
           } else {
             output = 'Execution completed with no output';
           }
         } catch (e: any) {
-          output = 'Compiler Error: ' + e.message + '\n\nPastikan koneksi internet Anda stabil.';
+          if (e.name === 'AbortError') {
+            output = 'Execution stopped by user.';
+          } else {
+            output = 'Compiler Error: ' + e.message + '\n\nPastikan koneksi internet Anda stabil.';
+          }
           hasError = true;
         }
       } else {
@@ -1358,6 +1481,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: ' + e.message, error: true } }));
     } finally {
       setRunningCode(prev => ({ ...prev, [questionId]: false }));
+      setCodeAbortControllers(prev => {
+        const newControllers = { ...prev };
+        delete newControllers[questionId];
+        return newControllers;
+      });
     }
   };
 
@@ -1788,7 +1916,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                 />
               )}
 
-              {q.type === 'livecode' && (
+              {q.type === 'livecode' && (() => {
+                const currentCode = liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || '');
+                const showTemplate = !currentCode.trim();
+                const displayCode = showTemplate ? CODE_TEMPLATES[q.language || 'javascript'] : currentCode;
+
+                if (showTemplate && liveCodeDrafts[q.id] === undefined) {
+                  setTimeout(() => handleLiveCodeDraftChange(q.id, CODE_TEMPLATES[q.language || 'javascript']), 0);
+                }
+
+                return (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
@@ -1803,7 +1940,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                         className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded"
                         title="Load Hello World template"
                       >
-                        Load Template
+                        Reset Template
                       </button>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1822,10 +1959,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
                   <div className="relative">
                     <div className="absolute top-0 left-0 right-0 bottom-0 overflow-auto bg-gray-950 rounded-md border border-gray-600 p-4 font-mono text-sm pointer-events-none whitespace-pre-wrap" style={{ lineHeight: '1.5' }}>
-                      {highlightCode(liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || ''), q.language || 'javascript')}
+                      {highlightCode(displayCode, q.language || 'javascript')}
                     </div>
                     <textarea
-                      value={liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || '')}
+                      value={displayCode}
                       onChange={(e) => handleLiveCodeDraftChange(q.id, e.target.value)}
                       placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'javascript']} Anda di sini...`}
                       className="w-full p-4 pl-12 bg-transparent rounded-md border border-gray-600 h-64 font-mono text-sm text-transparent caret-white resize-none"
@@ -1847,13 +1984,21 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                     >
                       Batalkan Perubahan
                     </button>
-                    <button
-                      onClick={() => runLiveCode(q.id, q.language || 'javascript')}
-                      disabled={runningCode[q.id]}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400"
-                    >
-                      {runningCode[q.id] ? 'Running...' : 'Run Code'}
-                    </button>
+                    {runningCode[q.id] ? (
+                      <button
+                        onClick={() => stopRunningCode(q.id)}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded animate-pulse"
+                      >
+                        Stop Running
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => runLiveCode(q.id, q.language || 'javascript')}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                      >
+                        Run Code
+                      </button>
+                    )}
                   </div>
 
                   {codeMessages[q.id] && (
@@ -1916,7 +2061,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
             </div>
           ))}
         </div>
