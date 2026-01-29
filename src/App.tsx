@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { ThemeProvider } from './context/ThemeContext';
-import ThemeToggle from './components/ui/ThemeToggle';
 import HomePage from './pages/HomePage';
 import TeacherAuthChoice from './components/auth/TeacherAuthChoice';
 import TeacherRegister from './components/auth/TeacherRegister';
@@ -22,53 +20,55 @@ import StudentExamStatusCheck from './components/student/StudentExamStatusCheck'
 import StudentPreCheck from './components/student/StudentPreCheck';
 import StudentExam from './components/student/StudentExam';
 
-function AppContent() {
+function App() {
+  // Block mobile devices at app level
   useEffect(() => {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                      (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
                      window.screen.width < 1024;
-
+    
     if (isMobile) {
       document.body.innerHTML = `
         <div style="
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          height: 100vh;
-          background: var(--bg-primary, #0a0a0a);
-          color: var(--error, #ef4444);
+          display: flex; 
+          justify-content: center; 
+          align-items: center; 
+          height: 100vh; 
+          background: #111827; 
+          color: #ef4444; 
           font-family: sans-serif;
           text-align: center;
           padding: 20px;
         ">
           <div>
-            <h1 style="font-size: 2rem; margin-bottom: 1rem;">Akses Ditolak</h1>
-            <p style="font-size: 1.2rem; margin-bottom: 0.5rem; color: var(--text-primary, #fafafa);">Platform ujian ini hanya dapat diakses dari:</p>
-            <ul style="list-style: none; padding: 0; font-size: 1.1rem; color: var(--text-secondary, #d4d4d4);">
-              <li>Laptop atau Desktop</li>
-              <li>Layar minimal 1024px</li>
-              <li>Browser Desktop</li>
+            <h1 style="font-size: 2rem; margin-bottom: 1rem;">🚫 Akses Ditolak</h1>
+            <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">Platform ujian ini hanya dapat diakses dari:</p>
+            <ul style="list-style: none; padding: 0; font-size: 1.1rem;">
+              <li>💻 Laptop atau Desktop</li>
+              <li>🖥️ Layar minimal 1024px</li>
+              <li>🌐 Browser Desktop</li>
             </ul>
-            <p style="margin-top: 1rem; color: var(--warning, #eab308);">Silakan gunakan perangkat yang sesuai untuk mengikuti ujian.</p>
+            <p style="margin-top: 1rem; color: #fbbf24;">Silakan gunakan perangkat yang sesuai untuk mengikuti ujian.</p>
           </div>
         </div>
       `;
       return;
     }
   }, []);
-
+  
   const [page, setPage] = useState('home');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [appState, setAppState] = useState<any>({});
   const [navigationHistory, setNavigationHistory] = useState<string[]>(['home']);
 
   const navigateTo = (pageName: string, data = {}) => {
+    // Clear navigation history when going to dashboard after exam completion
     if (pageName === 'student_dashboard' && data.currentUser && data.clearHistory) {
       setNavigationHistory(['home', 'student_dashboard']);
     } else {
       setNavigationHistory(prev => [...prev, pageName]);
     }
-
+    
     setPage(pageName);
     setAppState(currentState => {
       const newState = { ...currentState, ...data };
@@ -82,7 +82,7 @@ function AppContent() {
   const navigateBack = () => {
     if (navigationHistory.length > 1) {
       const newHistory = [...navigationHistory];
-      newHistory.pop();
+      newHistory.pop(); // Remove current page
       const previousPage = newHistory[newHistory.length - 1];
       setNavigationHistory(newHistory);
       setPage(previousPage);
@@ -91,7 +91,7 @@ function AppContent() {
 
   const renderPage = () => {
     const props = { navigateTo, navigateBack, appState, user: currentUser, canGoBack: navigationHistory.length > 1 };
-
+    
     switch (page) {
       case 'home':
         return <HomePage {...props} />;
@@ -139,20 +139,11 @@ function AppContent() {
   };
 
   return (
-    <div className="theme-bg theme-text min-h-screen font-sans transition-colors duration-300">
-      <ThemeToggle />
+    <div className="bg-gray-900 text-gray-100 min-h-screen font-sans">
       <div className="container mx-auto p-4 md:p-8">
         {renderPage()}
       </div>
     </div>
-  );
-}
-
-function App() {
-  return (
-    <ThemeProvider>
-      <AppContent />
-    </ThemeProvider>
   );
 }
 

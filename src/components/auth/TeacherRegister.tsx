@@ -40,11 +40,12 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
     }
 
     try {
+      // Generate unique ID for teacher
       const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
+      
       await setDoc(doc(db, `artifacts/${appId}/public/data/teachers`, teacherId), {
         username: formData.username,
-        password: formData.password,
+        password: formData.password, // In production, hash this password
         createdAt: new Date(),
         role: 'teacher'
       });
@@ -60,38 +61,38 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
 
   return (
     <div>
-      <button
-        onClick={navigateBack}
-        className="mb-6 btn-secondary"
+      <button 
+        onClick={navigateBack} 
+        className="mb-6 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg"
       >
         &larr; Kembali
       </button>
-      <h2 className="text-3xl font-bold mb-6 text-center theme-text">Daftar Akun Dosen</h2>
-      <div className="w-full max-w-md mx-auto card">
+      <h2 className="text-3xl font-bold mb-6 text-center">Daftar Akun Dosen</h2>
+      <div className="w-full max-w-md mx-auto bg-gray-800 p-8 rounded-lg shadow-xl">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            name="username"
+          <input 
+            name="username" 
             type="text"
             value={formData.username}
-            onChange={handleChange}
-            placeholder="Username"
-            className="input-field"
-            required
+            onChange={handleChange} 
+            placeholder="Username" 
+            className="w-full p-3 bg-gray-700 rounded-md border border-gray-600" 
+            required 
           />
           <div className="relative">
-            <input
-              name="password"
+            <input 
+              name="password" 
               type={showPassword ? "text" : "password"}
               value={formData.password}
-              onChange={handleChange}
-              placeholder="Password"
-              className="input-field pr-12"
-              required
+              onChange={handleChange} 
+              placeholder="Password" 
+              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 pr-12" 
+              required 
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center theme-text-muted"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
             >
               {showPassword ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -106,19 +107,19 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
             </button>
           </div>
           <div className="relative">
-            <input
-              name="confirmPassword"
+            <input 
+              name="confirmPassword" 
               type={showConfirmPassword ? "text" : "password"}
               value={formData.confirmPassword}
-              onChange={handleChange}
-              placeholder="Konfirmasi Password"
-              className="input-field pr-12"
-              required
+              onChange={handleChange} 
+              placeholder="Konfirmasi Password" 
+              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 pr-12" 
+              required 
             />
             <button
               type="button"
               onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center theme-text-muted"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
             >
               {showConfirmPassword ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -133,18 +134,18 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
             </button>
           </div>
           {error && <p className="text-red-500 text-sm">{error}</p>}
-          <button
-            type="submit"
+          <button 
+            type="submit" 
             disabled={isLoading}
-            className="w-full btn-primary disabled:opacity-50"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-indigo-400"
           >
             {isLoading ? 'Mendaftar...' : 'Daftar'}
           </button>
         </form>
         <div className="mt-4 text-center">
-          <button
+          <button 
             onClick={() => navigateTo('teacher_login')}
-            className="theme-text-muted hover:theme-text text-sm underline"
+            className="text-indigo-400 hover:text-indigo-300 text-sm"
           >
             Sudah punya akun? Login di sini
           </button>

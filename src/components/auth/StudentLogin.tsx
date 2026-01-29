@@ -26,18 +26,21 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ navigateTo, navigateBack })
     setIsLoading(true);
 
     try {
+      // Query student by username and password
       const studentsRef = collection(db, `artifacts/${appId}/public/data/students`);
       const q = query(
-        studentsRef,
+        studentsRef, 
         where("username", "==", formData.username),
         where("password", "==", formData.password)
       );
-
+      
       const querySnapshot = await getDocs(q);
-
+      
       if (!querySnapshot.empty) {
         const studentDoc = querySnapshot.docs[0];
         const studentData = { id: studentDoc.id, ...studentDoc.data() };
+        
+        // Store student info in app state
         navigateTo('student_dashboard', { currentUser: studentData });
       } else {
         setError('Username atau password salah');
@@ -51,38 +54,38 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ navigateTo, navigateBack })
 
   return (
     <div>
-      <button
-        onClick={navigateBack}
-        className="mb-6 btn-secondary"
+      <button 
+        onClick={navigateBack} 
+        className="mb-6 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg"
       >
         &larr; Kembali
       </button>
-      <h2 className="text-3xl font-bold mb-6 text-center theme-text">Login Siswa</h2>
-      <div className="w-full max-w-md mx-auto card">
+      <h2 className="text-3xl font-bold mb-6 text-center">Login Siswa</h2>
+      <div className="w-full max-w-md mx-auto bg-gray-800 p-8 rounded-lg shadow-xl">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            name="username"
+          <input 
+            name="username" 
             type="text"
             value={formData.username}
-            onChange={handleChange}
-            placeholder="Username"
-            className="input-field"
-            required
+            onChange={handleChange} 
+            placeholder="Username" 
+            className="w-full p-3 bg-gray-700 rounded-md border border-gray-600" 
+            required 
           />
           <div className="relative">
-            <input
-              name="password"
+            <input 
+              name="password" 
               type={showPassword ? "text" : "password"}
               value={formData.password}
-              onChange={handleChange}
-              placeholder="Password"
-              className="input-field pr-12"
-              required
+              onChange={handleChange} 
+              placeholder="Password" 
+              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 pr-12" 
+              required 
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center theme-text-muted"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white"
             >
               {showPassword ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -97,18 +100,18 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ navigateTo, navigateBack })
             </button>
           </div>
           {error && <p className="text-red-500 text-sm">{error}</p>}
-          <button
-            type="submit"
+          <button 
+            type="submit" 
             disabled={isLoading}
-            className="w-full btn-primary disabled:opacity-50"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-indigo-400"
           >
             {isLoading ? 'Login...' : 'Login'}
           </button>
         </form>
         <div className="mt-4 text-center">
-          <button
+          <button 
             onClick={() => navigateTo('student_register')}
-            className="theme-text-muted hover:theme-text text-sm underline"
+            className="text-indigo-400 hover:text-indigo-300 text-sm"
           >
             Belum punya akun? Daftar di sini
           </button>
