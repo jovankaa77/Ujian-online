@@ -5,15 +5,13 @@ import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',
-  python: 'Python'
+  python: 'Python',
+  csharp: 'C#'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {
-  javascript: `// JavaScript Hello World
-console.log("Hello, World!");`,
   php: `<?php
 // PHP Hello World
 echo "Hello, World!";
@@ -27,18 +25,18 @@ int main() {
     return 0;
 }`,
   python: `# Python Hello World
-print("Hello, World!")`
+print("Hello, World!")`,
+  csharp: `// C# Hello World
+using System;
+
+class Program {
+    static void Main() {
+        Console.WriteLine("Hello, World!");
+    }
+}`
 };
 
 const SYNTAX_COLORS: Record<string, Record<string, string>> = {
-  javascript: {
-    keywords: 'text-purple-400',
-    strings: 'text-green-400',
-    comments: 'text-gray-500',
-    numbers: 'text-orange-400',
-    functions: 'text-yellow-400',
-    operators: 'text-cyan-400'
-  },
   php: {
     keywords: 'text-purple-400',
     strings: 'text-green-400',
@@ -62,6 +60,14 @@ const SYNTAX_COLORS: Record<string, Record<string, string>> = {
     numbers: 'text-orange-400',
     functions: 'text-yellow-400',
     decorators: 'text-pink-400'
+  },
+  csharp: {
+    keywords: 'text-purple-400',
+    strings: 'text-green-400',
+    comments: 'text-gray-500',
+    numbers: 'text-orange-400',
+    types: 'text-cyan-400',
+    preprocessor: 'text-pink-400'
   }
 };
 
@@ -75,16 +81,7 @@ const highlightCode = (code: string, language: string): JSX.Element[] => {
 
     const patterns: { regex: RegExp; className: string }[] = [];
 
-    if (lang === 'javascript') {
-      patterns.push(
-        { regex: /(\/\/.*$)/gm, className: 'text-gray-500 italic' },
-        { regex: /(["'`])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
-        { regex: /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|try|catch|throw|new)\b/g, className: 'text-purple-400 font-semibold' },
-        { regex: /\b(console|window|document|Math|Array|Object|String|Number|Boolean|Promise)\b/g, className: 'text-yellow-400' },
-        { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' },
-        { regex: /(\+|-|\*|\/|=|===|!==|==|!=|<|>|<=|>=|&&|\|\|)/g, className: 'text-cyan-400' }
-      );
-    } else if (lang === 'php') {
+    if (lang === 'php') {
       patterns.push(
         { regex: /(\/\/.*$|#.*$)/gm, className: 'text-gray-500 italic' },
         { regex: /(["'])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
@@ -111,6 +108,15 @@ const highlightCode = (code: string, language: string): JSX.Element[] => {
         { regex: /\b(def|class|return|if|elif|else|for|while|try|except|finally|with|as|import|from|lambda|pass|break|continue|and|or|not|in|is|None|True|False|self)\b/g, className: 'text-purple-400 font-semibold' },
         { regex: /\b(print|input|len|range|str|int|float|list|dict|set|tuple|open|type)\b/g, className: 'text-yellow-400' },
         { regex: /(@\w+)/g, className: 'text-pink-400' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' }
+      );
+    } else if (lang === 'csharp') {
+      patterns.push(
+        { regex: /(\/\/.*$)/gm, className: 'text-gray-500 italic' },
+        { regex: /(["'])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
+        { regex: /\b(using|namespace|class|struct|interface|enum|public|private|protected|internal|static|void|int|string|bool|float|double|decimal|char|byte|object|var|new|return|if|else|for|foreach|while|do|switch|case|break|continue|try|catch|finally|throw|async|await|this|base|null|true|false|readonly|const|virtual|override|abstract|sealed)\b/g, className: 'text-purple-400 font-semibold' },
+        { regex: /\b(Console|String|Math|Array|List|Dictionary|Convert|DateTime|Exception|Task)\b/g, className: 'text-cyan-400' },
+        { regex: /\b(WriteLine|ReadLine|Write|Parse|ToString|GetType)\b/g, className: 'text-yellow-400' },
         { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' }
       );
     }
@@ -1252,31 +1258,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     showCodeMessage(questionId, 'Perubahan dibatalkan', 'warning');
   };
 
-  const DANGEROUS_JS_PATTERNS = [
-    /document\s*\.\s*write\s*\(/i,
-    /document\s*\.\s*writeln\s*\(/i,
-    /document\s*\.\s*open\s*\(/i,
-    /document\s*\.\s*close\s*\(/i,
-    /window\s*\.\s*location/i,
-    /location\s*\.\s*href/i,
-    /location\s*\.\s*replace/i,
-    /location\s*\.\s*assign/i,
-    /window\s*\.\s*open\s*\(/i,
-    /eval\s*\(/i,
-    /innerHTML\s*=/i,
-    /outerHTML\s*=/i
-  ];
-
-  const checkDangerousCode = (code: string): string | null => {
-    for (const pattern of DANGEROUS_JS_PATTERNS) {
-      if (pattern.test(code)) {
-        const match = code.match(pattern);
-        return match ? match[0] : 'dangerous code';
-      }
-    }
-    return null;
-  };
-
   const stopRunningCode = (questionId: string) => {
     const controller = codeAbortControllers[questionId];
     if (controller) {
@@ -1310,108 +1291,26 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       let output = '';
       let hasError = false;
 
-      if (language === 'javascript') {
-        const dangerousPattern = checkDangerousCode(code);
-        if (dangerousPattern) {
-          output = `Error: Kode berbahaya terdeteksi!\n\nKode yang menggunakan "${dangerousPattern}" tidak diperbolehkan karena dapat mengganggu halaman ujian.\n\nGunakan console.log() untuk menampilkan output.`;
-          hasError = true;
-        } else {
-          try {
-            const logs: string[] = [];
-            const errors: string[] = [];
-            let timedOut = false;
-
-            const timeoutPromise = new Promise<void>((_, reject) => {
-              setTimeout(() => {
-                timedOut = true;
-                reject(new Error('TIMEOUT: Kode berjalan terlalu lama (>5 detik). Kemungkinan infinite loop.'));
-              }, 5000);
-            });
-
-            const executePromise = new Promise<any>((resolve, reject) => {
-              try {
-                const safeCode = `
-                  "use strict";
-                  const __logs = [];
-                  const __errors = [];
-                  const console = {
-                    log: (...args) => __logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
-                    error: (...args) => __errors.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
-                    warn: (...args) => __logs.push('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
-                    info: (...args) => __logs.push('[INFO] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' '))
-                  };
-                  const document = undefined;
-                  const window = undefined;
-                  const location = undefined;
-                  const alert = undefined;
-                  const confirm = undefined;
-                  const prompt = undefined;
-                  const eval = undefined;
-                  const Function = undefined;
-
-                  let __result;
-                  try {
-                    __result = (function() {
-                      ${code}
-                    })();
-                  } catch(e) {
-                    __errors.push(e.message);
-                  }
-
-                  return { logs: __logs, errors: __errors, result: __result };
-                `;
-
-                const fn = new Function(safeCode);
-                const result = fn();
-                resolve(result);
-              } catch (e: any) {
-                reject(e);
-              }
-            });
-
-            try {
-              const result = await Promise.race([executePromise, timeoutPromise]) as any;
-
-              if (result && result.logs) {
-                logs.push(...result.logs);
-              }
-              if (result && result.errors && result.errors.length > 0) {
-                errors.push(...result.errors);
-              }
-
-              if (logs.length > 0) {
-                output = logs.join('\n');
-              }
-              if (errors.length > 0) {
-                output += (output ? '\n\n' : '') + 'Errors:\n' + errors.join('\n');
-                hasError = true;
-              }
-              if (result && result.result !== undefined) {
-                output += (output ? '\n' : '') + 'Return: ' + (typeof result.result === 'object' ? JSON.stringify(result.result, null, 2) : String(result.result));
-              }
-              if (!output) {
-                output = '(No output)';
-              }
-            } catch (e: any) {
-              output = 'Error: ' + e.message;
-              hasError = true;
-            }
-          } catch (e: any) {
-            output = 'Error: ' + e.message;
-            hasError = true;
-          }
-        }
-      } else if (language === 'python' || language === 'php' || language === 'cpp') {
+      if (language === 'python' || language === 'php' || language === 'cpp' || language === 'csharp') {
         const pistonLanguageMap: Record<string, string> = {
           python: 'python',
           php: 'php',
-          cpp: 'cpp'
+          cpp: 'cpp',
+          csharp: 'csharp'
         };
 
         const pistonVersionMap: Record<string, string> = {
           python: '3.10.0',
           php: '8.2.3',
-          cpp: '10.2.0'
+          cpp: '10.2.0',
+          csharp: '6.12.0'
+        };
+
+        const fileNameMap: Record<string, string> = {
+          python: 'main.py',
+          php: 'main.php',
+          cpp: 'main.cpp',
+          csharp: 'Main.cs'
         };
 
         try {
@@ -1425,7 +1324,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               version: pistonVersionMap[language],
               files: [
                 {
-                  name: language === 'cpp' ? 'main.cpp' : (language === 'php' ? 'main.php' : 'main.py'),
+                  name: fileNameMap[language],
                   content: code
                 }
               ],

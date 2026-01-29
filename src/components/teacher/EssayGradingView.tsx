@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  html: 'HTML',
-  javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',
-  python: 'Python'
+  python: 'Python',
+  csharp: 'C#'
 };
 
 interface Question {
@@ -45,6 +44,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [isSaving, setIsSaving] = useState(false);
   const [codeOutputs, setCodeOutputs] = useState<{ [key: string]: { output: string; error: boolean } }>({});
   const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
+  const abortControllersRef = useRef<{ [key: string]: AbortController }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
     const newScores = { ...essayScores };
@@ -58,6 +58,19 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     setLivecodeScores(newScores);
   };
 
+  const stopRunningCode = (questionId: string) => {
+    const controller = abortControllersRef.current[questionId];
+    if (controller) {
+      controller.abort();
+    }
+    setRunningCode(prev => ({ ...prev, [questionId]: false }));
+    setCodeOutputs(prev => ({
+      ...prev,
+      [questionId]: { output: 'Execution stopped by user.', error: true }
+    }));
+    delete abortControllersRef.current[questionId];
+  };
+
   const runStudentCode = async (questionId: string, language: string) => {
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
@@ -65,41 +78,95 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       return;
     }
 
+    const abortController = new AbortController();
+    abortControllersRef.current[questionId] = abortController;
+
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
-    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Running...', error: false } }));
+    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Compiling and running...', error: false } }));
 
     try {
       let output = '';
       let hasError = false;
 
-      if (language === 'javascript') {
+      if (language === 'python' || language === 'php' || language === 'cpp' || language === 'csharp') {
+        const pistonLanguageMap: Record<string, string> = {
+          python: 'python',
+          php: 'php',
+          cpp: 'cpp',
+          csharp: 'csharp'
+        };
+
+        const pistonVersionMap: Record<string, string> = {
+          python: '3.10.0',
+          php: '8.2.3',
+          cpp: '10.2.0',
+          csharp: '6.12.0'
+        };
+
+        const fileNameMap: Record<string, string> = {
+          python: 'main.py',
+          php: 'main.php',
+          cpp: 'main.cpp',
+          csharp: 'Main.cs'
+        };
+
         try {
-          const logs: string[] = [];
-          const originalLog = console.log;
-          console.log = (...args) => {
-            logs.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-          };
+          const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              language: pistonLanguageMap[language],
+              version: pistonVersionMap[language],
+              files: [
+                {
+                  name: fileNameMap[language],
+                  content: code
+                }
+              ],
+              stdin: '',
+              args: [],
+              compile_timeout: 10000,
+              run_timeout: 5000
+            }),
+            signal: abortController.signal
+          });
 
-          const result = new Function(code)();
-          console.log = originalLog;
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
 
-          if (logs.length > 0) {
-            output = logs.join('\n');
-          }
-          if (result !== undefined) {
-            output += (output ? '\n' : '') + 'Return: ' + (typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result));
-          }
-          if (!output) {
-            output = '(No output)';
+          const result = await response.json();
+
+          if (result.compile && result.compile.stderr) {
+            output = 'Compilation Error:\n' + result.compile.stderr;
+            hasError = true;
+          } else if (result.run) {
+            if (result.run.stderr) {
+              output = 'Runtime Error:\n' + result.run.stderr;
+              hasError = true;
+            } else if (result.run.stdout) {
+              output = result.run.stdout;
+            } else {
+              output = '(No output)';
+            }
+
+            if (result.run.signal === 'SIGKILL') {
+              output = 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.';
+              hasError = true;
+            }
+          } else {
+            output = 'Execution completed with no output';
           }
         } catch (e: any) {
-          output = 'Error: ' + e.message;
+          if (e.name === 'AbortError') {
+            output = 'Execution stopped by user.';
+          } else {
+            output = 'Compiler Error: ' + e.message + '\n\nPastikan koneksi internet Anda stabil.';
+          }
           hasError = true;
         }
-      } else if (language === 'html') {
-        output = '[HTML Preview]\n' + code.substring(0, 1000) + (code.length > 1000 ? '...' : '');
-      } else if (language === 'python' || language === 'php' || language === 'cpp') {
-        output = `[${LANGUAGE_LABELS[language]}]\nKode tidak dapat dijalankan langsung di browser.\n\nKode siswa:\n${code}`;
       } else {
         output = 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.';
         hasError = true;
@@ -110,6 +177,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: ' + e.message, error: true } }));
     } finally {
       setRunningCode(prev => ({ ...prev, [questionId]: false }));
+      delete abortControllersRef.current[questionId];
     }
   };
 
@@ -214,7 +282,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                       <span className="text-teal-400">#{qIndex + 1}</span> {q.text || '(Soal bergambar)'}
                     </p>
                     <span className="text-xs bg-teal-600 text-white px-2 py-1 rounded">
-                      {LANGUAGE_LABELS[q.language || 'javascript']}
+                      {LANGUAGE_LABELS[q.language || 'php']}
                     </span>
                   </div>
                   {q.image && (
@@ -234,13 +302,23 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
 
                   {session.answers[q.id] && (
                     <div className="mt-3">
-                      <button
-                        onClick={() => runStudentCode(q.id, q.language || 'javascript')}
-                        disabled={runningCode[q.id]}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400"
-                      >
-                        {runningCode[q.id] ? 'Running...' : 'Run Code'}
-                      </button>
+                      <div className="flex gap-2">
+                        {runningCode[q.id] ? (
+                          <button
+                            onClick={() => stopRunningCode(q.id)}
+                            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded animate-pulse"
+                          >
+                            Stop Running
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => runStudentCode(q.id, q.language || 'php')}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                          >
+                            Run Code
+                          </button>
+                        )}
+                      </div>
 
                       {codeOutputs[q.id] && (
                         <div className={`mt-3 p-4 rounded-md border ${codeOutputs[q.id].error ? 'bg-red-900 border-red-500' : 'bg-gray-900 border-gray-600'}`}>

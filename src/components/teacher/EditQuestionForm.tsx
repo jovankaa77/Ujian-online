@@ -1,13 +1,13 @@
 import React, { useState, useRef } from 'react';
 
-const SUPPORTED_LANGUAGES = ['javascript', 'php', 'cpp', 'python'] as const;
+const SUPPORTED_LANGUAGES = ['php', 'cpp', 'python', 'csharp'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
-  javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',
-  python: 'Python'
+  python: 'Python',
+  csharp: 'C#'
 };
 
 interface Question {
@@ -54,7 +54,7 @@ const EditQuestionForm: React.FC<EditQuestionFormProps> = ({ question, onSave, o
 
   const [options, setOptions] = useState<OptionData[]>(initialOptions);
   const [correctAnswer, setCorrectAnswer] = useState(question.type === 'mc' ? question.correctAnswer || 0 : 0);
-  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>(question.language || 'javascript');
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>(question.language || 'php');
   const questionImageRef = useRef<HTMLInputElement>(null);
   const optionImageRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null]);
 
