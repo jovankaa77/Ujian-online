@@ -4,14 +4,23 @@ import { db, appId } from '../../config/firebase';
 import jsPDF from 'jspdf';
 import EssayGradingView from './EssayGradingView';
 
+const LANGUAGE_LABELS: Record<string, string> = {
+  html: 'HTML',
+  javascript: 'JavaScript',
+  php: 'PHP',
+  cpp: 'C++',
+  python: 'Python'
+};
+
 interface Question {
   id: string;
   text: string;
-  type: 'mc' | 'essay';
+  type: 'mc' | 'essay' | 'livecode';
   options?: string[];
   optionImages?: (string | null)[];
   correctAnswer?: number;
   image?: string | null;
+  language?: string;
 }
 
 interface Session {
@@ -27,6 +36,7 @@ interface Session {
   violations: number;
   finalScore?: number;
   essayScores?: { [key: string]: number };
+  livecodeScores?: { [key: string]: number };
   scoreReduction?: number;
   answers?: { [questionId: string]: number | string };
 }
@@ -188,34 +198,52 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
     const mcScore = session.finalScore || 0;
     const mcQuestionCount = questions.filter(q => q.type === 'mc').length;
     const essayQuestions = questions.filter(q => q.type === 'essay');
-    
-    // Apply score reduction
+    const livecodeQuestions = questions.filter(q => q.type === 'livecode');
+
     const reduction = session.scoreReduction || 0;
-    
-    if (essayQuestions.length === 0) {
-      const finalScore = Math.max(0, mcScore - reduction);
-      return finalScore.toFixed(2);
-    }
-    
+
     let avgEssayScore = 0;
-    if (session.essayScores) {
+    if (session.essayScores && essayQuestions.length > 0) {
       const essayScoreValues = Object.values(session.essayScores);
       if (essayScoreValues.length > 0) {
         const totalEssayScore = essayScoreValues.reduce((sum, s) => sum + (s || 0), 0);
         avgEssayScore = totalEssayScore / essayScoreValues.length;
       }
     }
-    
-    if (mcQuestionCount > 0) {
-      // Ada soal PG dan Essay: 50% PG + 50% Essay
-      const baseScore = (mcScore * 0.5) + (avgEssayScore * 0.5);
-      const finalScore = Math.max(0, baseScore - reduction);
-      return finalScore.toFixed(2);
-    } else {
-      // Hanya ada soal Essay: 100% Essay
-      const finalScore = Math.max(0, avgEssayScore - reduction);
-      return finalScore.toFixed(2);
+
+    let avgLivecodeScore = 0;
+    if (session.livecodeScores && livecodeQuestions.length > 0) {
+      const livecodeScoreValues = Object.values(session.livecodeScores);
+      if (livecodeScoreValues.length > 0) {
+        const totalLivecodeScore = livecodeScoreValues.reduce((sum, s) => sum + (s || 0), 0);
+        avgLivecodeScore = totalLivecodeScore / livecodeScoreValues.length;
+      }
     }
+
+    const hasMC = mcQuestionCount > 0;
+    const hasEssay = essayQuestions.length > 0;
+    const hasLivecode = livecodeQuestions.length > 0;
+
+    let baseScore = 0;
+
+    if (hasMC && hasEssay && hasLivecode) {
+      baseScore = (mcScore * 0.34) + (avgEssayScore * 0.33) + (avgLivecodeScore * 0.33);
+    } else if (hasMC && hasEssay) {
+      baseScore = (mcScore * 0.5) + (avgEssayScore * 0.5);
+    } else if (hasMC && hasLivecode) {
+      baseScore = (mcScore * 0.5) + (avgLivecodeScore * 0.5);
+    } else if (hasEssay && hasLivecode) {
+      baseScore = (avgEssayScore * 0.5) + (avgLivecodeScore * 0.5);
+    } else if (hasMC) {
+      baseScore = mcScore;
+    } else if (hasEssay) {
+      baseScore = avgEssayScore;
+    } else if (hasLivecode) {
+      baseScore = avgLivecodeScore;
+    }
+
+    const finalScore = Math.max(0, baseScore - reduction);
+    return finalScore.toFixed(2);
   };
 
   const handleEditScore = (session: Session) => {
@@ -321,11 +349,11 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
     };
     
     // Column positions and widths for better spacing
-    const colPositions = [14, 20, 55, 75, 95, 115, 135, 150, 165, 180, 195];
-    const colWidths = [4, 33, 18, 18, 18, 18, 13, 13, 13, 13, 15];
-    
+    const colPositions = [14, 18, 48, 65, 82, 99, 115, 128, 141, 154, 167, 180, 195];
+    const colWidths = [3, 28, 15, 15, 15, 14, 11, 11, 11, 11, 11, 11, 15];
+
     // Add table headers
-    const headers = ['No', 'Nama', 'NIM', 'Jurusan', 'Kelas', 'Status', 'Warning', 'PG', 'Essay', 'Mines', 'Akhir'];
+    const headers = ['No', 'Nama', 'NIM', 'Jurusan', 'Kelas', 'Status', 'Warn', 'PG', 'Essay', 'Code', 'Mines', 'Akhir'];
     let yPosition = yPos;
     
     // Draw header background
@@ -413,6 +441,19 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           const totalEssayScore = essayScoreValues.reduce((sum, s) => sum + (s || 0), 0);
           const avgEssayScore = totalEssayScore / essayScoreValues.length;
           return avgEssayScore.toFixed(2);
+        })(),
+        (() => {
+          const livecodeQuestions = questions.filter(q => q.type === 'livecode');
+          if (livecodeQuestions.length === 0) return 'N/A';
+
+          if (!session.livecodeScores) return 'Wait';
+
+          const livecodeScoreValues = Object.values(session.livecodeScores);
+          if (livecodeScoreValues.length === 0) return 'Wait';
+
+          const totalLivecodeScore = livecodeScoreValues.reduce((sum, s) => sum + (s || 0), 0);
+          const avgLivecodeScore = totalLivecodeScore / livecodeScoreValues.length;
+          return avgLivecodeScore.toFixed(1);
         })(),
         (session.scoreReduction || 0).toString(),
         calculateTotalScore(session)
@@ -952,6 +993,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
               <th className="p-4">Pelanggaran</th>
               <th className="p-4">Nilai PG</th>
               <th className="p-4">Nilai Essay</th>
+              <th className="p-4">Nilai Live Code</th>
               <th className="p-4">Nilai Akhir</th>
               <th className="p-4">Pengurangan</th>
               <th className="p-4">History</th>
@@ -961,7 +1003,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           <tbody>
             {filteredSessions.length === 0 ? (
               <tr>
-                <td colSpan={12} className="text-center p-8 text-gray-400">
+                <td colSpan={13} className="text-center p-8 text-gray-400">
                   {sessions.length === 0 
                     ? "Belum ada siswa yang menyelesaikan ujian."
                     : "Tidak ada siswa yang sesuai dengan filter."
@@ -993,6 +1035,21 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                       return avgEssayScore.toFixed(2);
                     })()}
                   </td>
+                  <td className="p-4">
+                    {(() => {
+                      const livecodeQuestions = questions.filter(q => q.type === 'livecode');
+                      if (livecodeQuestions.length === 0) return 'N/A';
+
+                      if (!session.livecodeScores) return 'Belum dinilai';
+
+                      const livecodeScoreValues = Object.values(session.livecodeScores);
+                      if (livecodeScoreValues.length === 0) return 'Belum dinilai';
+
+                      const totalLivecodeScore = livecodeScoreValues.reduce((sum, s) => sum + (s || 0), 0);
+                      const avgLivecodeScore = totalLivecodeScore / livecodeScoreValues.length;
+                      return avgLivecodeScore.toFixed(2);
+                    })()}
+                  </td>
                   <td className="p-4 font-bold">{calculateTotalScore(session)}</td>
                   <td className="p-4">
                     <span className={`px-2 py-1 text-xs rounded ${
@@ -1013,13 +1070,13 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                     </button>
                   </td>
                   <td className="p-4">
-                    <div className="flex space-x-2">
+                    <div className="flex flex-wrap gap-1">
                       <button
                         onClick={() => setSelectedSession(session)}
                         className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-2 rounded"
-                        disabled={questions.filter(q => q.type === 'essay').length === 0}
+                        disabled={questions.filter(q => q.type === 'essay' || q.type === 'livecode').length === 0}
                       >
-                        Nilai Esai
+                        Nilai Manual
                       </button>
                       <button
                         onClick={() => handleEditScore(session)}

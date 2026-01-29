@@ -4,14 +4,23 @@ import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
 
+const LANGUAGE_LABELS: Record<string, string> = {
+  html: 'HTML',
+  javascript: 'JavaScript',
+  php: 'PHP',
+  cpp: 'C++',
+  python: 'Python'
+};
+
 interface Question {
   id: string;
   text: string;
-  type: 'mc' | 'essay';
+  type: 'mc' | 'essay' | 'livecode';
   options?: string[];
   optionImages?: (string | null)[];
   correctAnswer?: number;
   image?: string | null;
+  language?: string;
 }
 
 interface StudentExamProps {
@@ -47,6 +56,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [isFinished, setIsFinished] = useState(false);
   const [finalScore, setFinalScore] = useState<number | null>(null);
   const [violationReason, setViolationReason] = useState('');
+  const [liveCodeDrafts, setLiveCodeDrafts] = useState<{ [key: string]: string }>({});
+  const [codeOutputs, setCodeOutputs] = useState<{ [key: string]: { output: string; error: boolean } }>({});
+  const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showCameraControls, setShowCameraControls] = useState(false);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
@@ -1031,7 +1043,97 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     setAnswers(newAnswers);
     updateDoc(sessionDocRef, { answers: newAnswers });
   };
-  
+
+  const handleLiveCodeDraftChange = (questionId: string, code: string) => {
+    setLiveCodeDrafts(prev => ({ ...prev, [questionId]: code }));
+  };
+
+  const handleSaveLiveCode = (questionId: string) => {
+    const code = liveCodeDrafts[questionId];
+    if (!code || !code.trim()) {
+      alert('Kode tidak boleh kosong!');
+      return;
+    }
+    handleAnswerChange(questionId, code);
+    alert('Kode berhasil disimpan!');
+  };
+
+  const handleCancelLiveCode = (questionId: string) => {
+    const hasUnsavedChanges = liveCodeDrafts[questionId] && liveCodeDrafts[questionId] !== (answers[questionId] || '');
+    if (hasUnsavedChanges) {
+      if (!confirm('Kode belum disimpan. Apakah Anda yakin ingin membatalkan perubahan?')) {
+        return;
+      }
+    }
+    setLiveCodeDrafts(prev => ({ ...prev, [questionId]: answers[questionId] || '' }));
+    setCodeOutputs(prev => {
+      const newOutputs = { ...prev };
+      delete newOutputs[questionId];
+      return newOutputs;
+    });
+  };
+
+  const runLiveCode = async (questionId: string, language: string) => {
+    const code = liveCodeDrafts[questionId] || answers[questionId] || '';
+    if (!code.trim()) {
+      setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: Kode kosong!', error: true } }));
+      return;
+    }
+
+    setRunningCode(prev => ({ ...prev, [questionId]: true }));
+    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Running...', error: false } }));
+
+    try {
+      let output = '';
+      let hasError = false;
+
+      if (language === 'javascript') {
+        try {
+          const logs: string[] = [];
+          const originalLog = console.log;
+          console.log = (...args) => {
+            logs.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
+          };
+
+          const result = new Function(code)();
+          console.log = originalLog;
+
+          if (logs.length > 0) {
+            output = logs.join('\n');
+          }
+          if (result !== undefined) {
+            output += (output ? '\n' : '') + 'Return: ' + (typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result));
+          }
+          if (!output) {
+            output = '(No output)';
+          }
+        } catch (e: any) {
+          output = 'Error: ' + e.message;
+          hasError = true;
+        }
+      } else if (language === 'html') {
+        output = '[HTML Preview]\n' + code.substring(0, 500) + (code.length > 500 ? '...' : '');
+      } else if (language === 'python' || language === 'php' || language === 'cpp') {
+        output = `[${LANGUAGE_LABELS[language]}]\nCode akan dijalankan oleh dosen saat penilaian.\n\nPreview kode:\n${code.substring(0, 300)}${code.length > 300 ? '...' : ''}`;
+      } else {
+        output = 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.';
+        hasError = true;
+      }
+
+      setCodeOutputs(prev => ({ ...prev, [questionId]: { output, error: hasError } }));
+    } catch (e: any) {
+      setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: ' + e.message, error: true } }));
+    } finally {
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
+    }
+  };
+
+  const hasUnsavedLiveCode = (questionId: string) => {
+    const draft = liveCodeDrafts[questionId];
+    const saved = answers[questionId];
+    return draft !== undefined && draft !== (saved || '');
+  };
+
   const checkUnansweredQuestions = () => {
     const unanswered = questions
       .map((q, index) => ({ question: q, index: index + 1 }))
@@ -1157,7 +1259,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               Nilai Pilihan Ganda Anda: <span className="text-green-400">{finalScore?.toFixed(2)}</span>
             </p>
             <p className="text-lg text-gray-400 mt-2">
-              Nilai esai (jika ada) akan diperiksa oleh dosen.
+              Nilai esai dan live code (jika ada) akan diperiksa oleh dosen.
             </p>
             <button 
               onClick={() => navigateTo('student_dashboard', { currentUser: user, clearHistory: true })}
@@ -1451,6 +1553,86 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                   placeholder="Ketik jawaban esai Anda di sini..."
                   className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 h-32"
                 />
+              )}
+
+              {q.type === 'livecode' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded">
+                      {LANGUAGE_LABELS[q.language || 'javascript']}
+                    </span>
+                    {hasUnsavedLiveCode(q.id) && (
+                      <span className="text-sm text-yellow-400 animate-pulse">
+                        * Perubahan belum disimpan
+                      </span>
+                    )}
+                    {answers[q.id] && !hasUnsavedLiveCode(q.id) && (
+                      <span className="text-sm text-green-400">
+                        Tersimpan
+                      </span>
+                    )}
+                  </div>
+
+                  <textarea
+                    value={liveCodeDrafts[q.id] !== undefined ? liveCodeDrafts[q.id] : (answers[q.id] || '')}
+                    onChange={(e) => handleLiveCodeDraftChange(q.id, e.target.value)}
+                    placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'javascript']} Anda di sini...`}
+                    className="w-full p-4 bg-gray-900 rounded-md border border-gray-600 h-64 font-mono text-sm"
+                    spellCheck={false}
+                  />
+
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => handleSaveLiveCode(q.id)}
+                      className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                      Simpan Kode
+                    </button>
+                    <button
+                      onClick={() => handleCancelLiveCode(q.id)}
+                      className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded"
+                    >
+                      Batalkan Perubahan
+                    </button>
+                    <button
+                      onClick={() => runLiveCode(q.id, q.language || 'javascript')}
+                      disabled={runningCode[q.id]}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-blue-400"
+                    >
+                      {runningCode[q.id] ? 'Running...' : 'Run Code'}
+                    </button>
+                  </div>
+
+                  {!answers[q.id] && (
+                    <div className="bg-yellow-900 border border-yellow-500 p-3 rounded-md">
+                      <p className="text-yellow-300 text-sm">
+                        Kode belum tersimpan. Klik "Simpan Kode" untuk menyimpan jawaban Anda.
+                        Jika tidak disimpan, soal ini dianggap tidak dijawab.
+                      </p>
+                    </div>
+                  )}
+
+                  {codeOutputs[q.id] && (
+                    <div className={`p-4 rounded-md border ${codeOutputs[q.id].error ? 'bg-red-900 border-red-500' : 'bg-gray-900 border-gray-600'}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-bold text-gray-300">Output:</span>
+                        <button
+                          onClick={() => setCodeOutputs(prev => {
+                            const newOutputs = { ...prev };
+                            delete newOutputs[q.id];
+                            return newOutputs;
+                          })}
+                          className="text-gray-400 hover:text-white text-sm"
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                      <pre className={`text-sm font-mono whitespace-pre-wrap ${codeOutputs[q.id].error ? 'text-red-300' : 'text-green-300'}`}>
+                        {codeOutputs[q.id].output}
+                      </pre>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           ))}

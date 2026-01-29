@@ -1,13 +1,25 @@
 import React, { useState, useRef } from 'react';
 
+const SUPPORTED_LANGUAGES = ['html', 'javascript', 'php', 'cpp', 'python'] as const;
+type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
+
+const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
+  html: 'HTML',
+  javascript: 'JavaScript',
+  php: 'PHP',
+  cpp: 'C++',
+  python: 'Python'
+};
+
 interface Question {
   id: string;
   text: string;
-  type: 'mc' | 'essay';
+  type: 'mc' | 'essay' | 'livecode';
   options?: string[];
   optionImages?: (string | null)[];
   correctAnswer?: number;
   image?: string | null;
+  language?: SupportedLanguage;
 }
 
 interface OptionData {
@@ -43,6 +55,7 @@ const EditQuestionForm: React.FC<EditQuestionFormProps> = ({ question, onSave, o
 
   const [options, setOptions] = useState<OptionData[]>(initialOptions);
   const [correctAnswer, setCorrectAnswer] = useState(question.type === 'mc' ? question.correctAnswer || 0 : 0);
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>(question.language || 'javascript');
   const questionImageRef = useRef<HTMLInputElement>(null);
   const optionImageRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null]);
 
@@ -139,6 +152,10 @@ const EditQuestionForm: React.FC<EditQuestionFormProps> = ({ question, onSave, o
       updatedData.correctAnswer = correctAnswer;
     }
 
+    if (questionType === 'livecode') {
+      updatedData.language = selectedLanguage;
+    }
+
     onSave(updatedData);
   };
 
@@ -188,6 +205,24 @@ const EditQuestionForm: React.FC<EditQuestionFormProps> = ({ question, onSave, o
             </div>
           )}
         </div>
+
+        {questionType === 'livecode' && (
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Bahasa Pemrograman</label>
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value as SupportedLanguage)}
+              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600"
+            >
+              {SUPPORTED_LANGUAGES.map(lang => (
+                <option key={lang} value={lang}>{LANGUAGE_LABELS[lang]}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">
+              Siswa akan menulis kode dalam bahasa {LANGUAGE_LABELS[selectedLanguage]} dan dapat menjalankannya.
+            </p>
+          </div>
+        )}
 
         {questionType === 'mc' && (
           <div className="space-y-4">

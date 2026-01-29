@@ -14,10 +14,21 @@ interface OptionData {
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 
+const SUPPORTED_LANGUAGES = ['html', 'javascript', 'php', 'cpp', 'python'] as const;
+type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
+
+const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
+  html: 'HTML',
+  javascript: 'JavaScript',
+  php: 'PHP',
+  cpp: 'C++',
+  python: 'Python'
+};
+
 const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
   const [questionText, setQuestionText] = useState('');
   const [questionImage, setQuestionImage] = useState<string | null>(null);
-  const [questionType, setQuestionType] = useState<'mc' | 'essay'>('mc');
+  const [questionType, setQuestionType] = useState<'mc' | 'essay' | 'livecode'>('mc');
   const [options, setOptions] = useState<OptionData[]>([
     { text: '', image: null },
     { text: '', image: null },
@@ -25,6 +36,7 @@ const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
     { text: '', image: null }
   ]);
   const [correctAnswer, setCorrectAnswer] = useState(0);
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('javascript');
   const questionImageRef = useRef<HTMLInputElement>(null);
   const optionImageRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null]);
 
@@ -120,6 +132,10 @@ const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
       questionData.correctAnswer = correctAnswer;
     }
 
+    if (questionType === 'livecode') {
+      questionData.language = selectedLanguage;
+    }
+
     await addDoc(questionsRef, questionData);
     setQuestionText('');
     setQuestionImage(null);
@@ -144,11 +160,12 @@ const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
       <form onSubmit={addQuestion} className="space-y-4">
         <select
           value={questionType}
-          onChange={(e) => setQuestionType(e.target.value as 'mc' | 'essay')}
+          onChange={(e) => setQuestionType(e.target.value as 'mc' | 'essay' | 'livecode')}
           className="w-full p-3 bg-gray-700 rounded-md border border-gray-600"
         >
           <option value="mc">Pilihan Ganda</option>
           <option value="essay">Esai</option>
+          <option value="livecode">Live Code</option>
         </select>
 
         <div className="space-y-2">
@@ -194,6 +211,24 @@ const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
             </div>
           )}
         </div>
+
+        {questionType === 'livecode' && (
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Bahasa Pemrograman</label>
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value as SupportedLanguage)}
+              className="w-full p-3 bg-gray-700 rounded-md border border-gray-600"
+            >
+              {SUPPORTED_LANGUAGES.map(lang => (
+                <option key={lang} value={lang}>{LANGUAGE_LABELS[lang]}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">
+              Siswa akan menulis kode dalam bahasa {LANGUAGE_LABELS[selectedLanguage]} dan dapat menjalankannya untuk melihat output.
+            </p>
+          </div>
+        )}
 
         {questionType === 'mc' && (
           <div className="space-y-4">

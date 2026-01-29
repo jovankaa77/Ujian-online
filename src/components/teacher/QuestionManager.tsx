@@ -6,14 +6,23 @@ import Modal from '../ui/Modal';
 import AddQuestionForm from './AddQuestionForm';
 import EditQuestionForm from './EditQuestionForm';
 
+const LANGUAGE_LABELS: Record<string, string> = {
+  html: 'HTML',
+  javascript: 'JavaScript',
+  php: 'PHP',
+  cpp: 'C++',
+  python: 'Python'
+};
+
 interface Question {
   id: string;
   text: string;
-  type: 'mc' | 'essay';
+  type: 'mc' | 'essay' | 'livecode';
   options?: string[];
   optionImages?: (string | null)[];
   correctAnswer?: number;
   image?: string | null;
+  language?: string;
 }
 
 interface QuestionManagerProps {
@@ -190,6 +199,11 @@ const QuestionManager: React.FC<QuestionManagerProps> = ({ navigateBack, appStat
                     )}
                     {q.type === 'essay' && (
                       <span className="text-xs text-gray-400 mt-1 inline-block">(Esai)</span>
+                    )}
+                    {q.type === 'livecode' && (
+                      <span className="text-xs bg-teal-600 text-white px-2 py-1 rounded mt-1 inline-block">
+                        Live Code - {LANGUAGE_LABELS[q.language || 'javascript']}
+                      </span>
                     )}
                   </div>
                   <div className="flex flex-shrink-0 space-x-2">
