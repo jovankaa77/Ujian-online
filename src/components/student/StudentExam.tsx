@@ -59,6 +59,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [liveCodeDrafts, setLiveCodeDrafts] = useState<{ [key: string]: string }>({});
   const [codeOutputs, setCodeOutputs] = useState<{ [key: string]: { output: string; error: boolean } }>({});
   const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
+  const [codeMessages, setCodeMessages] = useState<{ [key: string]: { text: string; type: 'success' | 'error' | 'warning' } }>({});
+  const [showCancelConfirm, setShowCancelConfirm] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showCameraControls, setShowCameraControls] = useState(false);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
@@ -1048,29 +1050,45 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     setLiveCodeDrafts(prev => ({ ...prev, [questionId]: code }));
   };
 
+  const showCodeMessage = (questionId: string, text: string, type: 'success' | 'error' | 'warning') => {
+    setCodeMessages(prev => ({ ...prev, [questionId]: { text, type } }));
+    setTimeout(() => {
+      setCodeMessages(prev => {
+        const newMessages = { ...prev };
+        delete newMessages[questionId];
+        return newMessages;
+      });
+    }, 3000);
+  };
+
   const handleSaveLiveCode = (questionId: string) => {
     const code = liveCodeDrafts[questionId];
     if (!code || !code.trim()) {
-      alert('Kode tidak boleh kosong!');
+      showCodeMessage(questionId, 'Kode tidak boleh kosong!', 'error');
       return;
     }
     handleAnswerChange(questionId, code);
-    alert('Kode berhasil disimpan!');
+    showCodeMessage(questionId, 'Kode berhasil disimpan!', 'success');
   };
 
   const handleCancelLiveCode = (questionId: string) => {
     const hasUnsavedChanges = liveCodeDrafts[questionId] && liveCodeDrafts[questionId] !== (answers[questionId] || '');
     if (hasUnsavedChanges) {
-      if (!confirm('Kode belum disimpan. Apakah Anda yakin ingin membatalkan perubahan?')) {
-        return;
-      }
+      setShowCancelConfirm(questionId);
+      return;
     }
+    performCancelLiveCode(questionId);
+  };
+
+  const performCancelLiveCode = (questionId: string) => {
     setLiveCodeDrafts(prev => ({ ...prev, [questionId]: answers[questionId] || '' }));
     setCodeOutputs(prev => {
       const newOutputs = { ...prev };
       delete newOutputs[questionId];
       return newOutputs;
     });
+    setShowCancelConfirm(null);
+    showCodeMessage(questionId, 'Perubahan dibatalkan', 'warning');
   };
 
   const runLiveCode = async (questionId: string, language: string) => {
@@ -1602,6 +1620,36 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                       {runningCode[q.id] ? 'Running...' : 'Run Code'}
                     </button>
                   </div>
+
+                  {codeMessages[q.id] && (
+                    <div className={`p-3 rounded-md text-sm font-medium ${
+                      codeMessages[q.id].type === 'success' ? 'bg-green-800 text-green-200 border border-green-500' :
+                      codeMessages[q.id].type === 'error' ? 'bg-red-800 text-red-200 border border-red-500' :
+                      'bg-yellow-800 text-yellow-200 border border-yellow-500'
+                    }`}>
+                      {codeMessages[q.id].text}
+                    </div>
+                  )}
+
+                  {showCancelConfirm === q.id && (
+                    <div className="bg-yellow-900 border border-yellow-500 p-4 rounded-md">
+                      <p className="text-yellow-200 mb-3">Kode belum disimpan. Apakah Anda yakin ingin membatalkan perubahan?</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => performCancelLiveCode(q.id)}
+                          className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded text-sm"
+                        >
+                          Ya, Batalkan
+                        </button>
+                        <button
+                          onClick={() => setShowCancelConfirm(null)}
+                          className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded text-sm"
+                        >
+                          Tidak, Kembali
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {!answers[q.id] && (
                     <div className="bg-yellow-900 border border-yellow-500 p-3 rounded-md">
