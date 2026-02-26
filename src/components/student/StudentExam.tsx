@@ -3,6 +3,15 @@ import { collection, getDocs, updateDoc, doc, query, limit } from 'firebase/fire
 import { db, appId } from '../../config/firebase';
 import { AlertIcon } from '../ui/Icons';
 import Modal from '../ui/Modal';
+import {
+  loadFaceModels,
+  detectAllFaces,
+  euclideanDistance,
+  captureFrameFromVideo,
+  uploadPhotoToStorage,
+  saveFaceVerificationLog,
+  arrayToDescriptor,
+} from '../../utils/faceVerification';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
@@ -248,6 +257,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const vadInstanceRef = useRef<MicVAD | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const isFinishedRef = useRef(false);
+
+  const [faceViolationCount, setFaceViolationCount] = useState(0);
+  const faceViolationCountRef = useRef(0);
+  const faceMonitorIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentFaceStateRef = useRef<'normal' | 'multiple_faces' | 'unrecognized_face'>('normal');
+  const faceCanvasRef = useRef<HTMLCanvasElement>(null);
+  const baselineDescriptorRef = useRef<Float32Array | null>(null);
+  const faceBaselineUrlRef = useRef<string | null>(null);
 
   const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
   const attendancePhotoIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -748,6 +765,102 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       return () => clearInterval(checkCameraHealth);
     }
   }, [isCameraReady, isFinished]);
+
+  // Face verification monitoring
+  useEffect(() => {
+    if (isFinished || isLoading || questions.length === 0 || !isCameraReady) return;
+
+    const { faceDescriptor, faceBaselineUrl } = appState;
+    if (faceDescriptor && Array.isArray(faceDescriptor)) {
+      baselineDescriptorRef.current = arrayToDescriptor(faceDescriptor);
+    }
+    if (faceBaselineUrl) {
+      faceBaselineUrlRef.current = faceBaselineUrl;
+    }
+
+    if (!baselineDescriptorRef.current) return;
+
+    let modelsReady = false;
+    loadFaceModels().then(ok => { modelsReady = ok; });
+
+    const runFaceCheck = async () => {
+      if (isFinishedRef.current || !videoRef.current || !modelsReady || !baselineDescriptorRef.current) return;
+      if (!faceCanvasRef.current) return;
+
+      try {
+        const detections = await detectAllFaces(videoRef.current);
+
+        if (detections.length > 1) {
+          if (currentFaceStateRef.current !== 'multiple_faces') {
+            currentFaceStateRef.current = 'multiple_faces';
+            const photo = captureFrameFromVideo(videoRef.current!, faceCanvasRef.current!);
+            if (photo) {
+              const url = await uploadPhotoToStorage(photo, `face_violations/${user.id}_${Date.now()}.jpg`);
+              await saveFaceVerificationLog({
+                userId: user.id,
+                fullName: studentInfo?.name || user.fullName || '',
+                kelas: studentInfo?.className || user.className || '',
+                jurusan: studentInfo?.major || user.major || '',
+                violationType: 'Wajah Ganda',
+                evidencePhotoUrl: url,
+                baselinePhotoUrl: faceBaselineUrlRef.current || '',
+                timestamp: new Date(),
+                examId: exam.id,
+              });
+              setFaceViolationCount(prev => {
+                const n = prev + 1;
+                faceViolationCountRef.current = n;
+                return n;
+              });
+            }
+          }
+        } else if (detections.length === 1) {
+          const dist = euclideanDistance(detections[0].descriptor, baselineDescriptorRef.current!);
+          if (dist > 0.6) {
+            if (currentFaceStateRef.current !== 'unrecognized_face') {
+              currentFaceStateRef.current = 'unrecognized_face';
+              const photo = captureFrameFromVideo(videoRef.current!, faceCanvasRef.current!);
+              if (photo) {
+                const url = await uploadPhotoToStorage(photo, `face_violations/${user.id}_${Date.now()}.jpg`);
+                await saveFaceVerificationLog({
+                  userId: user.id,
+                  fullName: studentInfo?.name || user.fullName || '',
+                  kelas: studentInfo?.className || user.className || '',
+                  jurusan: studentInfo?.major || user.major || '',
+                  violationType: 'Wajah Tidak Dikenali',
+                  evidencePhotoUrl: url,
+                  baselinePhotoUrl: faceBaselineUrlRef.current || '',
+                  timestamp: new Date(),
+                  examId: exam.id,
+                });
+                setFaceViolationCount(prev => {
+                  const n = prev + 1;
+                  faceViolationCountRef.current = n;
+                  return n;
+                });
+              }
+            }
+          } else {
+            currentFaceStateRef.current = 'normal';
+          }
+        }
+      } catch (err) {
+        console.error('Face check error:', err);
+      }
+    };
+
+    const startDelay = setTimeout(() => {
+      runFaceCheck();
+      faceMonitorIntervalRef.current = setInterval(runFaceCheck, 4000);
+    }, 3000);
+
+    return () => {
+      clearTimeout(startDelay);
+      if (faceMonitorIntervalRef.current) {
+        clearInterval(faceMonitorIntervalRef.current);
+      }
+    };
+  }, [isFinished, isLoading, questions.length, isCameraReady]);
 
   // Attendance photo capture system
   useEffect(() => {
@@ -1431,6 +1544,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     if (attendanceIntervalRef.current) {
       clearInterval(attendanceIntervalRef.current);
     }
+
+    if (faceMonitorIntervalRef.current) {
+      clearInterval(faceMonitorIntervalRef.current);
+    }
     
     // Exit fullscreen when exam is finished
     if (isInFullscreen()) {
@@ -1679,7 +1796,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         <div className="text-xs text-purple-400 mb-2">
           🎤 Human Voice: aktif
         </div>
-        
+        <div className="text-xs text-teal-400 mb-2">
+          Verify Face: {faceViolationCount}
+        </div>
+
         {isRecordingAudio && (
           <div className="text-xs text-red-400 mb-2 animate-pulse">
             🔴 Recording Audio... (4s)
@@ -1709,14 +1829,18 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       </div>
       
       {/* Hidden canvas for photo capture */}
-      <canvas 
+      <canvas
         ref={canvasRef}
-        style={{ 
+        style={{
           position: 'absolute',
           top: '-1000px',
           left: '-1000px',
           pointerEvents: 'none'
         }}
+      />
+      <canvas
+        ref={faceCanvasRef}
+        style={{ display: 'none' }}
       />
       
 
