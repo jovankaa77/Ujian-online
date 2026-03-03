@@ -65,14 +65,31 @@ export const euclideanDistance = (desc1: Float32Array, desc2: Float32Array): num
 export const captureFrameFromVideo = (
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
-  maxWidth = 320,
-  maxHeight = 240,
-  quality = 0.5
+  maxWidth = 640,
+  maxHeight = 480,
+  quality = 0.7
 ): string | null => {
-  if (video.readyState < 2 || video.videoWidth === 0) return null;
+  console.log('[captureFrame] Starting capture...', {
+    videoReadyState: video.readyState,
+    videoWidth: video.videoWidth,
+    videoHeight: video.videoHeight
+  });
+
+  if (video.readyState < 2) {
+    console.log('[captureFrame] Video not ready (readyState < 2)');
+    return null;
+  }
+
+  if (video.videoWidth === 0 || video.videoHeight === 0) {
+    console.log('[captureFrame] Video has no dimensions');
+    return null;
+  }
 
   const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
+  if (!ctx) {
+    console.log('[captureFrame] Could not get canvas context');
+    return null;
+  }
 
   let w = video.videoWidth;
   let h = video.videoHeight;
@@ -87,7 +104,14 @@ export const captureFrameFromVideo = (
   ctx.drawImage(video, 0, 0, w, h);
 
   const data = canvas.toDataURL('image/jpeg', quality);
-  return data.length > 5000 ? data : null;
+  console.log('[captureFrame] Captured frame, data length:', data.length);
+
+  if (data.length < 1000) {
+    console.log('[captureFrame] Data too small, returning null');
+    return null;
+  }
+
+  return data;
 };
 
 export interface FaceVerificationLog {

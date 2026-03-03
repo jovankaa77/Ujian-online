@@ -395,7 +395,9 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         status: 'started',
         violations: 0,
         answers: {},
-        finalScore: null
+        finalScore: null,
+        faceBaselineUrl: baselinePhotoUrl || null,
+        faceVerifiedAt: baselinePhotoUrl ? new Date().toISOString() : null,
       });
 
       navigateTo('student_exam', {

@@ -402,8 +402,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       faceDescriptorLength: faceDescriptor?.length
     });
 
-    if (isFinished || isLoading || !isCameraReady) {
-      console.log('[FaceInit] Skipping - conditions not met');
+    if (isFinished || isLoading) {
+      console.log('[FaceInit] Skipping - exam finished or loading');
       return;
     }
 
@@ -420,7 +420,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             baselineDescriptorRef.current = arrayToDescriptor(faceDescriptor);
             console.log('[FaceInit] Baseline descriptor set, length:', baselineDescriptorRef.current.length);
           } else {
-            console.log('[FaceInit] No faceDescriptor provided or empty');
+            console.log('[FaceInit] WARNING: No faceDescriptor provided or empty - face matching will not work');
+          }
+
+          if (faceCheckIntervalRef.current) {
+            clearInterval(faceCheckIntervalRef.current);
           }
 
           console.log('[FaceInit] Starting face check interval (every 5 seconds)');
@@ -429,6 +433,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               checkFaceVerification();
             }
           }, 5000);
+
+          setTimeout(() => {
+            console.log('[FaceInit] Running initial face check after 3 seconds...');
+            if (!isFinishedRef.current) {
+              checkFaceVerification();
+            }
+          }, 3000);
         }
       } catch (error) {
         console.error('[FaceInit] Failed to initialize face verification:', error);
@@ -443,7 +454,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         clearInterval(faceCheckIntervalRef.current);
       }
     };
-  }, [isFinished, isLoading, isCameraReady, faceDescriptor]);
+  }, [isFinished, isLoading, faceDescriptor]);
 
   const initializeVAD = async (isRetry = false) => {
     if (isFinishedRef.current || audioRecordingCountRef.current >= 10) {

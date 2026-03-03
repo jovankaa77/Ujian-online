@@ -21,6 +21,16 @@ interface FaceLog {
   examId: string;
 }
 
+interface BaselinePhoto {
+  id: string;
+  studentId: string;
+  fullName: string;
+  kelas: string;
+  jurusan: string;
+  faceBaselineUrl: string;
+  faceVerifiedAt: string;
+}
+
 const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
   navigateBack,
   appState,
@@ -28,17 +38,20 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
   const { exam } = appState;
   const [logs, setLogs] = useState<FaceLog[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<FaceLog[]>([]);
+  const [baselinePhotos, setBaselinePhotos] = useState<BaselinePhoto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedImage, setSelectedImage] = useState<{ baseline: string; evidence: string; name: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<'violations' | 'baselines'>('violations');
 
   useEffect(() => {
     loadLogs();
+    loadBaselinePhotos();
   }, [exam?.id]);
 
   useEffect(() => {
     filterLogs();
-  }, [logs, searchTerm]);
+  }, [logs, searchTerm, activeTab, baselinePhotos]);
 
   const loadLogs = async () => {
     if (!exam?.id) return;
@@ -91,13 +104,64 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
     }
   };
 
+  const loadBaselinePhotos = async () => {
+    if (!exam?.id) return;
+
+    try {
+      const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+      const snapshot = await getDocs(sessionsRef);
+      const photos: BaselinePhoto[] = [];
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.faceBaselineUrl) {
+          photos.push({
+            id: docSnap.id,
+            studentId: data.studentId || '',
+            fullName: data.studentInfo?.fullName || data.studentInfo?.name || '',
+            kelas: data.studentInfo?.className || '',
+            jurusan: data.studentInfo?.major || '',
+            faceBaselineUrl: data.faceBaselineUrl,
+            faceVerifiedAt: data.faceVerifiedAt || data.startTime?.toDate?.()?.toISOString() || '',
+          });
+        }
+      });
+
+      const usersRef = collection(db, `artifacts/${appId}/public/data/users`);
+      const usersSnapshot = await getDocs(usersRef);
+
+      usersSnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.faceBaselineUrl) {
+          const existingIndex = photos.findIndex(p => p.studentId === data.id);
+          if (existingIndex === -1) {
+            photos.push({
+              id: docSnap.id,
+              studentId: data.id || '',
+              fullName: data.fullName || data.name || '',
+              kelas: data.kelas || data.className || '',
+              jurusan: data.jurusan || data.major || '',
+              faceBaselineUrl: data.faceBaselineUrl,
+              faceVerifiedAt: data.faceVerifiedAt || '',
+            });
+          }
+        }
+      });
+
+      setBaselinePhotos(photos);
+    } catch (error) {
+      console.error('Error loading baseline photos:', error);
+    }
+  };
+
   const filterLogs = () => {
-    if (!searchTerm.trim()) {
+    const term = searchTerm.toLowerCase().trim();
+
+    if (!term) {
       setFilteredLogs(logs);
       return;
     }
 
-    const term = searchTerm.toLowerCase();
     const filtered = logs.filter((log) => {
       return (
         log.fullName?.toLowerCase().includes(term) ||
@@ -107,6 +171,19 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
     });
 
     setFilteredLogs(filtered);
+  };
+
+  const getFilteredBaselines = () => {
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return baselinePhotos;
+
+    return baselinePhotos.filter((photo) => {
+      return (
+        photo.fullName?.toLowerCase().includes(term) ||
+        photo.kelas?.toLowerCase().includes(term) ||
+        photo.jurusan?.toLowerCase().includes(term)
+      );
+    });
   };
 
   const formatTimestamp = (timestamp: any): string => {
@@ -153,6 +230,29 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
         </p>
       </div>
 
+      <div className="mb-6 flex gap-2">
+        <button
+          onClick={() => setActiveTab('violations')}
+          className={`px-4 py-2 rounded-lg font-bold transition-colors ${
+            activeTab === 'violations'
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          Pelanggaran Wajah ({logs.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('baselines')}
+          className={`px-4 py-2 rounded-lg font-bold transition-colors ${
+            activeTab === 'baselines'
+              ? 'bg-teal-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          Foto Verifikasi Awal ({baselinePhotos.length})
+        </button>
+      </div>
+
       <div className="mb-6 bg-gray-800 p-4 rounded-lg">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1">
@@ -169,7 +269,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
           </div>
           <div className="flex items-end">
             <button
-              onClick={loadLogs}
+              onClick={() => { loadLogs(); loadBaselinePhotos(); }}
               className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg"
             >
               Refresh Data
@@ -178,44 +278,46 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
         </div>
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-gray-400">
-          Menampilkan <span className="font-bold text-white">{filteredLogs.length}</span> dari{' '}
-          <span className="font-bold text-white">{logs.length}</span> pelanggaran
-        </p>
-      </div>
-
-      {isLoading ? (
-        <div className="flex justify-center items-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-teal-500"></div>
-        </div>
-      ) : filteredLogs.length === 0 ? (
-        <div className="bg-gray-800 rounded-lg p-8 text-center">
-          <div className="text-gray-400 mb-2">
-            <svg
-              className="w-16 h-16 mx-auto mb-4 opacity-50"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
+      {activeTab === 'violations' && (
+        <>
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-gray-400">
+              Menampilkan <span className="font-bold text-white">{filteredLogs.length}</span> dari{' '}
+              <span className="font-bold text-white">{logs.length}</span> pelanggaran
+            </p>
           </div>
-          <p className="text-lg text-gray-300">Tidak ada pelanggaran wajah terdeteksi</p>
-          <p className="text-sm text-gray-500 mt-2">
-            {searchTerm
-              ? 'Coba ubah kata kunci pencarian'
-              : 'Semua siswa mengikuti ujian dengan baik'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredLogs.map((log) => (
+
+          {isLoading ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-teal-500"></div>
+            </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="bg-gray-800 rounded-lg p-8 text-center">
+              <div className="text-gray-400 mb-2">
+                <svg
+                  className="w-16 h-16 mx-auto mb-4 opacity-50"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <p className="text-lg text-gray-300">Tidak ada pelanggaran wajah terdeteksi</p>
+              <p className="text-sm text-gray-500 mt-2">
+                {searchTerm
+                  ? 'Coba ubah kata kunci pencarian'
+                  : 'Semua siswa mengikuti ujian dengan baik'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredLogs.map((log) => (
             <div
               key={log.id}
               className="bg-gray-800 rounded-lg overflow-hidden shadow-lg border border-gray-700 hover:border-gray-600 transition-colors"
@@ -287,7 +389,87 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
               </div>
             </div>
           ))}
-        </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'baselines' && (
+        <>
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-gray-400">
+              Menampilkan <span className="font-bold text-white">{getFilteredBaselines().length}</span> dari{' '}
+              <span className="font-bold text-white">{baselinePhotos.length}</span> foto verifikasi
+            </p>
+          </div>
+
+          {isLoading ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-teal-500"></div>
+            </div>
+          ) : getFilteredBaselines().length === 0 ? (
+            <div className="bg-gray-800 rounded-lg p-8 text-center">
+              <div className="text-gray-400 mb-2">
+                <svg
+                  className="w-16 h-16 mx-auto mb-4 opacity-50"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                  />
+                </svg>
+              </div>
+              <p className="text-lg text-gray-300">Belum ada foto verifikasi</p>
+              <p className="text-sm text-gray-500 mt-2">
+                {searchTerm
+                  ? 'Coba ubah kata kunci pencarian'
+                  : 'Foto verifikasi akan muncul saat siswa memulai ujian'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {getFilteredBaselines().map((photo) => (
+                <div
+                  key={photo.id}
+                  className="bg-gray-800 rounded-lg overflow-hidden shadow-lg border border-gray-700 hover:border-teal-500 transition-colors"
+                >
+                  <div className="aspect-square bg-gray-900 overflow-hidden">
+                    <img
+                      src={photo.faceBaselineUrl}
+                      alt={photo.fullName}
+                      className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                      onClick={() =>
+                        setSelectedImage({
+                          baseline: photo.faceBaselineUrl,
+                          evidence: '',
+                          name: photo.fullName,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="p-3">
+                    <h4 className="font-bold text-white text-sm truncate">{photo.fullName || 'Nama tidak tersedia'}</h4>
+                    <p className="text-xs text-gray-400 truncate">
+                      {photo.kelas && <span>{photo.kelas}</span>}
+                      {photo.kelas && photo.jurusan && <span> - </span>}
+                      {photo.jurusan && <span>{photo.jurusan}</span>}
+                    </p>
+                    {photo.faceVerifiedAt && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatTimestamp(photo.faceVerifiedAt)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {selectedImage && (
