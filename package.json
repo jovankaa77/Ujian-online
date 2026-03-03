@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.27",
+    "face-api.js": "^0.22.2",
     "firebase": "^12.1.0",
     "jspdf": "^3.0.1",
     "jspdf-autotable": "^5.0.2",
