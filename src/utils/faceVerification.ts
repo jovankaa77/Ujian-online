@@ -1,7 +1,6 @@
 import * as faceapi from 'face-api.js';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc } from 'firebase/firestore';
-import { db, storage, appId } from '../config/firebase';
+import { db, appId } from '../config/firebase';
 
 let modelsLoaded = false;
 let modelsLoading = false;
@@ -63,33 +62,12 @@ export const euclideanDistance = (desc1: Float32Array, desc2: Float32Array): num
   );
 };
 
-const dataURLtoBlob = (dataURL: string): Blob => {
-  const parts = dataURL.split(',');
-  const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-  const bstr = atob(parts[1]);
-  const u8arr = new Uint8Array(bstr.length);
-  for (let i = 0; i < bstr.length; i++) {
-    u8arr[i] = bstr.charCodeAt(i);
-  }
-  return new Blob([u8arr], { type: mime });
-};
-
-export const uploadPhotoToStorage = async (
-  dataURL: string,
-  path: string
-): Promise<string> => {
-  const blob = dataURLtoBlob(dataURL);
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, blob);
-  return getDownloadURL(storageRef);
-};
-
 export const captureFrameFromVideo = (
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
-  maxWidth = 640,
-  maxHeight = 480,
-  quality = 0.6
+  maxWidth = 320,
+  maxHeight = 240,
+  quality = 0.5
 ): string | null => {
   if (video.readyState < 2 || video.videoWidth === 0) return null;
 
@@ -113,7 +91,7 @@ export const captureFrameFromVideo = (
 };
 
 export interface FaceVerificationLog {
-  userId: string;
+  studentId: string;
   fullName: string;
   kelas: string;
   jurusan: string;

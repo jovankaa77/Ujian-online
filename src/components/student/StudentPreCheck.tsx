@@ -6,7 +6,6 @@ import {
   loadFaceModels,
   detectSingleFace,
   captureFrameFromVideo,
-  uploadPhotoToStorage,
   descriptorToArray,
 } from '../../utils/faceVerification';
 
@@ -285,18 +284,15 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         return;
       }
 
-      const storagePath = `face_baselines/${user.id}_${Date.now()}.jpg`;
-      const photoUrl = await uploadPhotoToStorage(photoData, storagePath);
-
       const descriptor = detection.descriptor;
       setBaselineDescriptor(descriptor);
-      setBaselinePhotoUrl(photoUrl);
+      setBaselinePhotoUrl(photoData);
 
       const userDocRef = doc(db, `artifacts/${appId}/public/data/users`, user.id);
       try {
         await updateDoc(userDocRef, {
           faceDescriptor: descriptorToArray(descriptor),
-          faceBaselineUrl: photoUrl,
+          faceBaselineUrl: photoData,
           faceVerifiedAt: new Date().toISOString(),
         });
       } catch {
@@ -307,7 +303,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           kelas: studentInfo?.className || user.className || '',
           jurusan: studentInfo?.major || user.major || '',
           faceDescriptor: descriptorToArray(descriptor),
-          faceBaselineUrl: photoUrl,
+          faceBaselineUrl: photoData,
           faceVerifiedAt: new Date().toISOString(),
         });
       }
