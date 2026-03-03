@@ -48,11 +48,46 @@ export const detectSingleFace = async (
 export const detectAllFaces = async (
   input: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement
 ) => {
-  const detections = await faceapi
-    .detectAllFaces(input, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
-    .withFaceLandmarks()
-    .withFaceDescriptors();
-  return detections;
+  try {
+    if (input instanceof HTMLVideoElement) {
+      if (input.readyState < 2 || input.videoWidth === 0) {
+        console.log('[detectAllFaces] Video not ready');
+        return [];
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = input.videoWidth;
+      canvas.height = input.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        console.log('[detectAllFaces] Could not get canvas context');
+        return [];
+      }
+      ctx.drawImage(input, 0, 0);
+
+      console.log('[detectAllFaces] Detecting faces from canvas...', {
+        width: canvas.width,
+        height: canvas.height
+      });
+
+      const detections = await faceapi
+        .detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+      console.log('[detectAllFaces] Found', detections.length, 'faces');
+      return detections;
+    }
+
+    const detections = await faceapi
+      .detectAllFaces(input, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+    return detections;
+  } catch (error) {
+    console.error('[detectAllFaces] Error:', error);
+    return [];
+  }
 };
 
 export const euclideanDistance = (desc1: Float32Array, desc2: Float32Array): number => {

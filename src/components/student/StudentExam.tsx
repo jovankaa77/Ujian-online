@@ -297,8 +297,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     evidencePhoto: string
   ) => {
     try {
+      console.log('[FaceViolation] Saving violation to database...', {
+        violationType,
+        studentId: user.id,
+        examId: exam.id,
+        examCode: exam.code,
+        photoLength: evidencePhoto?.length
+      });
+
       const logsRef = collection(db, `artifacts/${appId}/public/data/face_verification_logs`);
-      await addDoc(logsRef, {
+      const docRef = await addDoc(logsRef, {
         studentId: user.id,
         fullName: studentInfo?.name || studentInfo?.fullName || '',
         kelas: studentInfo?.className || '',
@@ -308,10 +316,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         baselinePhotoUrl: faceBaselineUrl || '',
         timestamp: new Date(),
         examId: exam.id,
+        examCode: exam.code,
       });
-      console.log(`Face violation logged: ${violationType}`);
+      console.log(`[FaceViolation] Successfully saved! Doc ID: ${docRef.id}`);
     } catch (error) {
-      console.error('Failed to save face violation log:', error);
+      console.error('[FaceViolation] Failed to save:', error);
     }
   };
 
