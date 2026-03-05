@@ -295,6 +295,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const isCameraReadyRef = useRef(false);
   const lastViolationTypeRef = useRef<string>('normal');
   const faceCheckRunningRef = useRef(false);
+  const [faceWarningMessage, setFaceWarningMessage] = useState<string | null>(null);
 
   const saveFaceViolationLog = async (
     violationType: 'Wajah Ganda' | 'Wajah Tidak Dikenali',
@@ -349,11 +350,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       console.log(`[FaceCheck] Detected ${detections.length} face(s)`);
 
       if (detections.length === 0) {
-        lastViolationTypeRef.current = 'normal';
+        lastViolationTypeRef.current = 'no_face';
+        setFaceWarningMessage('Wajah tidak terdeteksi di kamera. Pastikan wajah Anda terlihat jelas.');
         return;
       }
 
       if (detections.length > 1) {
+        setFaceWarningMessage(`Terdeteksi ${detections.length} wajah di kamera. Hanya Anda yang boleh berada di depan layar selama ujian.`);
         if (lastViolationTypeRef.current !== 'double') {
           lastViolationTypeRef.current = 'double';
           console.log(`[FaceCheck] VIOLATION: Multiple faces (${detections.length})`);
@@ -373,6 +376,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         console.log(`[FaceCheck] Face distance: ${distance.toFixed(4)} (threshold: 0.6)`);
 
         if (distance > 0.6) {
+          setFaceWarningMessage('Wajah yang terdeteksi berbeda dari identitas saat pemeriksaan perangkat. Pelanggaran ini telah dicatat.');
           if (lastViolationTypeRef.current !== 'unrecognized') {
             lastViolationTypeRef.current = 'unrecognized';
             console.log(`[FaceCheck] VIOLATION: Face mismatch (distance: ${distance.toFixed(3)})`);
@@ -385,7 +389,11 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           }
         } else {
           lastViolationTypeRef.current = 'normal';
+          setFaceWarningMessage(null);
         }
+      } else if (detections.length === 1) {
+        lastViolationTypeRef.current = 'normal';
+        setFaceWarningMessage(null);
       }
     } catch (error) {
       console.error('[FaceCheck] Error:', error);
@@ -1906,7 +1914,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       />
       
 
-      <div className="bg-gray-800 p-4 rounded-lg shadow-lg sticky top-4 z-10 flex justify-between items-center">
+      <div className="bg-gray-800 p-4 rounded-lg shadow-lg sticky top-4 z-10">
         <div className="w-full">
           <div className="flex justify-center mb-4">
             <div className="text-center">
@@ -1917,6 +1925,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               </div>
             </div>
           </div>
+
+          {faceWarningMessage && (
+            <div className="mb-4 mx-auto max-w-xl text-center px-4 py-3 rounded-lg bg-red-900 border border-red-500 animate-pulse">
+              <p className="text-red-200 text-sm font-semibold">{faceWarningMessage}</p>
+            </div>
+          )}
+
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-xl font-bold">{exam.name}</h2>
