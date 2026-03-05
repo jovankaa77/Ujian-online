@@ -7,6 +7,7 @@ import {
   detectSingleFace,
   captureFrameFromVideo,
   descriptorToArray,
+  areModelsLoaded,
 } from '../../utils/faceVerification';
 
 interface StudentPreCheckProps {
@@ -263,26 +264,40 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
   }, []);
 
   const handleCaptureFace = async () => {
-    if (!videoRef.current || !faceCanvasRef.current || faceModelStatus !== 'loaded') return;
+    if (!videoRef.current || faceModelStatus !== 'loaded') return;
 
     setFaceCapturing(true);
     setFaceError(null);
 
     try {
+      if (!areModelsLoaded()) {
+        console.log('[PreCheck] Models not ready, reloading...');
+        const loaded = await loadFaceModels();
+        if (!loaded) {
+          setFaceError('Model pengenalan wajah gagal dimuat. Klik Refresh Pemeriksaan.');
+          setFaceCapturing(false);
+          return;
+        }
+      }
+
+      console.log('[PreCheck] Detecting face from video...');
       const detection = await detectSingleFace(videoRef.current);
 
       if (!detection) {
-        setFaceError('Wajah tidak terdeteksi. Pastikan wajah Anda terlihat jelas di kamera.');
+        setFaceError('Wajah tidak terdeteksi. Pastikan wajah Anda terlihat jelas di kamera dengan pencahayaan yang baik.');
         setFaceCapturing(false);
         return;
       }
 
-      const photoData = captureFrameFromVideo(videoRef.current, faceCanvasRef.current);
+      console.log('[PreCheck] Face detected, capturing photo...');
+      const photoData = captureFrameFromVideo(videoRef.current);
       if (!photoData) {
         setFaceError('Gagal mengambil foto. Coba lagi.');
         setFaceCapturing(false);
         return;
       }
+
+      console.log('[PreCheck] Baseline photo captured:', Math.round(photoData.length / 1024), 'KB');
 
       const descriptor = detection.descriptor;
       setBaselineDescriptor(descriptor);
@@ -308,9 +323,10 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         });
       }
 
+      console.log('[PreCheck] Face verification complete');
       setFaceVerified(true);
     } catch (error: any) {
-      console.error('Face capture error:', error);
+      console.error('[PreCheck] Face capture error:', error);
       setFaceError(`Gagal verifikasi wajah: ${error.message}`);
     } finally {
       setFaceCapturing(false);

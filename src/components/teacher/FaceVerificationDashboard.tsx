@@ -19,6 +19,7 @@ interface FaceLog {
   baselinePhotoUrl: string;
   timestamp: any;
   examId: string;
+  examCode: string;
 }
 
 interface BaselinePhoto {
@@ -124,27 +125,6 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
             faceBaselineUrl: data.faceBaselineUrl,
             faceVerifiedAt: data.faceVerifiedAt || data.startTime?.toDate?.()?.toISOString() || '',
           });
-        }
-      });
-
-      const usersRef = collection(db, `artifacts/${appId}/public/data/users`);
-      const usersSnapshot = await getDocs(usersRef);
-
-      usersSnapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.faceBaselineUrl) {
-          const existingIndex = photos.findIndex(p => p.studentId === data.id);
-          if (existingIndex === -1) {
-            photos.push({
-              id: docSnap.id,
-              studentId: data.id || '',
-              fullName: data.fullName || data.name || '',
-              kelas: data.kelas || data.className || '',
-              jurusan: data.jurusan || data.major || '',
-              faceBaselineUrl: data.faceBaselineUrl,
-              faceVerifiedAt: data.faceVerifiedAt || '',
-            });
-          }
         }
       });
 

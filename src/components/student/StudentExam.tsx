@@ -9,6 +9,7 @@ import {
   euclideanDistance,
   arrayToDescriptor,
   captureFrameFromVideo,
+  areModelsLoaded,
 } from '../../utils/faceVerification';
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -287,10 +288,13 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
   const [faceViolationCount, setFaceViolationCount] = useState(0);
   const faceViolationCountRef = useRef(0);
+  const faceModelLoadedRef = useRef(false);
   const [faceModelLoaded, setFaceModelLoaded] = useState(false);
   const baselineDescriptorRef = useRef<Float32Array | null>(null);
   const faceCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const faceCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isCameraReadyRef = useRef(false);
+  const lastViolationTypeRef = useRef<string>('normal');
+  const faceCheckRunningRef = useRef(false);
 
   const saveFaceViolationLog = async (
     violationType: 'Wajah Ganda' | 'Wajah Tidak Dikenali',
@@ -316,7 +320,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         baselinePhotoUrl: faceBaselineUrl || '',
         timestamp: new Date(),
         examId: exam.id,
-        examCode: exam.code,
+        examCode: exam.code || '',
       });
       console.log(`[FaceViolation] Successfully saved! Doc ID: ${docRef.id}`);
     } catch (error) {
@@ -325,53 +329,40 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   };
 
   const checkFaceVerification = async () => {
-    console.log('[FaceCheck] Starting check...', {
-      hasVideo: !!videoRef.current,
-      hasCanvas: !!faceCanvasRef.current,
-      modelLoaded: faceModelLoaded,
-      cameraReady: isCameraReady,
-      videoWidth: videoRef.current?.videoWidth,
-      hasBaseline: !!baselineDescriptorRef.current
-    });
+    if (faceCheckRunningRef.current) return;
+    if (isFinishedRef.current) return;
+    if (!videoRef.current) return;
+    if (!faceModelLoadedRef.current || !areModelsLoaded()) return;
+    if (!isCameraReadyRef.current) return;
 
-    if (!videoRef.current || !faceCanvasRef.current) {
-      console.log('[FaceCheck] Missing video or canvas ref');
+    const video = videoRef.current;
+    if (!video.videoWidth || video.videoWidth === 0 || video.readyState < 2) {
+      console.log('[FaceCheck] Video not ready, skipping');
       return;
     }
 
-    if (!faceModelLoaded) {
-      console.log('[FaceCheck] Face model not loaded yet');
-      return;
-    }
-
-    if (isFinishedRef.current) {
-      console.log('[FaceCheck] Exam finished, skipping');
-      return;
-    }
-
-    if (!isCameraReady || !videoRef.current.videoWidth || videoRef.current.videoWidth === 0) {
-      console.log('[FaceCheck] Camera not ready or video has no width');
-      return;
-    }
+    faceCheckRunningRef.current = true;
 
     try {
-      console.log('[FaceCheck] Calling detectAllFaces...');
-      const detections = await detectAllFaces(videoRef.current);
+      console.log('[FaceCheck] Running detection...');
+      const detections = await detectAllFaces(video);
       console.log(`[FaceCheck] Detected ${detections.length} face(s)`);
 
       if (detections.length === 0) {
-        console.log('[FaceCheck] No faces detected');
+        lastViolationTypeRef.current = 'normal';
         return;
       }
 
       if (detections.length > 1) {
-        console.log(`[FaceCheck] VIOLATION: Multiple faces detected: ${detections.length}`);
-        const evidencePhoto = captureFrameFromVideo(videoRef.current, faceCanvasRef.current);
-        if (evidencePhoto) {
-          faceViolationCountRef.current += 1;
-          setFaceViolationCount(faceViolationCountRef.current);
-          console.log(`[FaceCheck] Face violation count: ${faceViolationCountRef.current}`);
-          await saveFaceViolationLog('Wajah Ganda', evidencePhoto);
+        if (lastViolationTypeRef.current !== 'double') {
+          lastViolationTypeRef.current = 'double';
+          console.log(`[FaceCheck] VIOLATION: Multiple faces (${detections.length})`);
+          const evidencePhoto = captureFrameFromVideo(video);
+          if (evidencePhoto) {
+            faceViolationCountRef.current += 1;
+            setFaceViolationCount(faceViolationCountRef.current);
+            await saveFaceViolationLog('Wajah Ganda', evidencePhoto);
+          }
         }
         return;
       }
@@ -381,40 +372,30 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         const distance = euclideanDistance(baselineDescriptorRef.current, currentDescriptor);
         console.log(`[FaceCheck] Face distance: ${distance.toFixed(4)} (threshold: 0.6)`);
 
-        const threshold = 0.6;
-        if (distance > threshold) {
-          console.log(`[FaceCheck] VIOLATION: Face mismatch! Distance: ${distance.toFixed(3)}`);
-          const evidencePhoto = captureFrameFromVideo(videoRef.current, faceCanvasRef.current);
-          if (evidencePhoto) {
-            faceViolationCountRef.current += 1;
-            setFaceViolationCount(faceViolationCountRef.current);
-            console.log(`[FaceCheck] Face violation count: ${faceViolationCountRef.current}`);
-            await saveFaceViolationLog('Wajah Tidak Dikenali', evidencePhoto);
+        if (distance > 0.6) {
+          if (lastViolationTypeRef.current !== 'unrecognized') {
+            lastViolationTypeRef.current = 'unrecognized';
+            console.log(`[FaceCheck] VIOLATION: Face mismatch (distance: ${distance.toFixed(3)})`);
+            const evidencePhoto = captureFrameFromVideo(video);
+            if (evidencePhoto) {
+              faceViolationCountRef.current += 1;
+              setFaceViolationCount(faceViolationCountRef.current);
+              await saveFaceViolationLog('Wajah Tidak Dikenali', evidencePhoto);
+            }
           }
         } else {
-          console.log(`[FaceCheck] Face matched (distance: ${distance.toFixed(4)})`);
+          lastViolationTypeRef.current = 'normal';
         }
-      } else if (!baselineDescriptorRef.current) {
-        console.log('[FaceCheck] No baseline descriptor available for comparison');
       }
     } catch (error) {
-      console.error('[FaceCheck] Face verification error:', error);
+      console.error('[FaceCheck] Error:', error);
+    } finally {
+      faceCheckRunningRef.current = false;
     }
   };
 
   useEffect(() => {
-    console.log('[FaceInit] useEffect triggered', {
-      isFinished,
-      isLoading,
-      isCameraReady,
-      hasFaceDescriptor: !!faceDescriptor,
-      faceDescriptorLength: faceDescriptor?.length
-    });
-
-    if (isFinished || isLoading) {
-      console.log('[FaceInit] Skipping - exam finished or loading');
-      return;
-    }
+    if (isFinished || isLoading) return;
 
     const initFaceVerification = async () => {
       try {
@@ -423,20 +404,21 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         console.log('[FaceInit] Face models loaded:', loaded);
 
         if (loaded) {
+          faceModelLoadedRef.current = true;
           setFaceModelLoaded(true);
 
           if (faceDescriptor && Array.isArray(faceDescriptor) && faceDescriptor.length > 0) {
             baselineDescriptorRef.current = arrayToDescriptor(faceDescriptor);
             console.log('[FaceInit] Baseline descriptor set, length:', baselineDescriptorRef.current.length);
           } else {
-            console.log('[FaceInit] WARNING: No faceDescriptor provided or empty - face matching will not work');
+            console.log('[FaceInit] WARNING: No faceDescriptor - face matching disabled');
           }
 
           if (faceCheckIntervalRef.current) {
             clearInterval(faceCheckIntervalRef.current);
           }
 
-          console.log('[FaceInit] Starting face check interval (every 5 seconds)');
+          console.log('[FaceInit] Starting face check interval (every 5s)');
           faceCheckIntervalRef.current = setInterval(() => {
             if (!isFinishedRef.current) {
               checkFaceVerification();
@@ -444,14 +426,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           }, 5000);
 
           setTimeout(() => {
-            console.log('[FaceInit] Running initial face check after 3 seconds...');
+            console.log('[FaceInit] Running initial face check...');
             if (!isFinishedRef.current) {
               checkFaceVerification();
             }
           }, 3000);
         }
       } catch (error) {
-        console.error('[FaceInit] Failed to initialize face verification:', error);
+        console.error('[FaceInit] Failed to init:', error);
       }
     };
 
@@ -459,7 +441,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
     return () => {
       if (faceCheckIntervalRef.current) {
-        console.log('[FaceInit] Cleaning up face check interval');
         clearInterval(faceCheckIntervalRef.current);
       }
     };
@@ -608,7 +589,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         }
         
         setCameraError(null);
-        setIsCameraReady(false);
+        isCameraReadyRef.current = false; setIsCameraReady(false);
         
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { 
@@ -632,9 +613,10 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                 videoRef.current.readyState >= 2 && 
                 videoRef.current.videoWidth > 0 && 
                 videoRef.current.videoHeight > 0) {
-              console.log("📷 Camera ready:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
+              console.log("Camera ready:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight);
+              isCameraReadyRef.current = true;
               setIsCameraReady(true);
-              cameraInitRetryCount.current = 0; // Reset retry count on success
+              cameraInitRetryCount.current = 0;
             } else {
               setTimeout(checkVideoReady, 100);
             }
@@ -645,8 +627,9 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           
           // Fallback timeout
           setTimeout(() => {
-            if (!isCameraReady && videoRef.current) {
-              console.log("📷 Camera timeout, forcing ready state");
+            if (!isCameraReadyRef.current && videoRef.current) {
+              console.log("Camera timeout, forcing ready state");
+              isCameraReadyRef.current = true;
               setIsCameraReady(true);
               cameraInitRetryCount.current = 0;
             }
@@ -664,7 +647,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             initializeCamera(retryCount + 1);
           }, 2000); // Wait 2 seconds before retry
         } else {
-          setIsCameraReady(false);
+          isCameraReadyRef.current = false; setIsCameraReady(false);
           setCameraError("Camera failed after multiple attempts");
         }
       }
@@ -891,7 +874,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Reinitialize camera
     try {
       setCameraError(null);
-      setIsCameraReady(false);
+      isCameraReadyRef.current = false; setIsCameraReady(false);
       
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
@@ -939,7 +922,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           // Check if video is still playing and stream is active
           if (video.readyState < 2 || !stream.active || stream.getTracks().length === 0) {
             console.log("⚠️ Camera health check failed, attempting restart...");
-            setIsCameraReady(false);
+            isCameraReadyRef.current = false; setIsCameraReady(false);
             restartCamera();
           }
         }
@@ -1914,16 +1897,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       {/* Hidden canvas for photo capture */}
       <canvas
         ref={canvasRef}
-        style={{
-          position: 'absolute',
-          top: '-1000px',
-          left: '-1000px',
-          pointerEvents: 'none'
-        }}
-      />
-      {/* Hidden canvas for face verification */}
-      <canvas
-        ref={faceCanvasRef}
         style={{
           position: 'absolute',
           top: '-1000px',
