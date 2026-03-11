@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, getDocs, query, limit, startAfter, orderBy, DocumentSnapshot } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 interface ViolationInfo {
   timestamp: string;
@@ -213,7 +213,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
       ];
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: 46,
       head: [['No', 'Nama / NIM', 'Jurusan', 'Status', 'Pelanggaran', 'Daftar Pelanggaran']],
       body: dataToExport,
@@ -272,7 +272,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         }
       },
       didDrawPage: (data: any) => {
-        const pageCount = (doc as any).internal.getNumberOfPages();
+        const pageCount = doc.getNumberOfPages();
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
         doc.text(
