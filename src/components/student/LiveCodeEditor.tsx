@@ -22,173 +22,39 @@ const WEB_DEFAULT_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kerangka Sederhana</title>
+  <style type="text/css">
+    /* Reset dasar untuk menghilangkan margin dan padding default */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    /* Mengatur body secara keseluruhan */
+    body {
+      font-family: 'Arial', sans-serif;
+      line-height: 1.6;
+      background-color: #f4f4f4;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    h1 {
+      text-align: center;
+    }
+    @media (max-width: 768px) {
+
+    }
+  </style>
 </head>
 <body>
-  <header>
-    <h1>Website Anda</h1>
-    <nav>
-      <ul>
-        <li><a href="#">Home</a></li>
-        <li><a href="#">Tentang</a></li>
-        <li><a href="#">Layanan</a></li>
-        <li><a href="#">Kontak</a></li>
-      </ul>
-    </nav>
-  </header>
-
-  <div class="main-content">
-    <aside class="sidebar">
-      <h3>Menu Samping</h3>
-      <ul>
-        <li><a href="#">Link 1</a></li>
-        <li><a href="#">Link 2</a></li>
-        <li><a href="#">Link 3</a></li>
-      </ul>
-    </aside>
-
-    <section class="content">
-      <h2>Konten Utama</h2>
-      <p>Ini adalah konten utama halaman web Anda.</p>
-    </section>
-  </div>
-
-  <footer>
-    <p>&copy; 2026 Website Anda</p>
-  </footer>
+  <h1>Hello world!</h1>
 </body>
 </html>`;
 
-const WEB_DEFAULT_CSS = `* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: 'Arial', sans-serif;
-  line-height: 1.6;
-  background-color: #f4f4f4;
-  color: #333;
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-
-header {
-  background-color: #333;
-  color: #fff;
-  padding: 20px 0;
-  text-align: center;
-}
-
-header h1 {
-  font-size: 2rem;
-  margin-bottom: 10px;
-}
-
-nav ul {
-  list-style: none;
-  padding: 0;
-}
-
-nav ul li {
-  display: inline-block;
-  margin-right: 20px;
-}
-
-nav ul li a {
-  color: #fff;
-  text-decoration: none;
-  font-size: 1.1rem;
-  transition: color 0.3s ease;
-}
-
-nav ul li a:hover {
-  color: #ddd;
-}
-
-.main-content {
-  display: flex;
-  flex-wrap: wrap;
-  margin-top: 20px;
-  gap: 20px;
-  justify-content: space-between;
-  flex: 1;
-}
-
-.sidebar {
-  flex: 0 0 25%;
-  background-color: #fff;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.sidebar h3 {
-  font-size: 1.4rem;
-  margin-bottom: 10px;
-}
-
-.sidebar ul {
-  list-style: none;
-}
-
-.sidebar ul li {
-  margin-bottom: 10px;
-}
-
-.sidebar ul li a {
-  color: #333;
-  text-decoration: none;
-  font-size: 1rem;
-}
-
-.sidebar ul li a:hover {
-  color: #007BFF;
-  text-decoration: underline;
-}
-
-.content {
-  flex: 0 0 70%;
-  background-color: #fff;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.content h2 {
-  font-size: 1.8rem;
-  margin-bottom: 20px;
-}
-
-.content p {
-  font-size: 1rem;
-  line-height: 1.8;
-}
-
-footer {
-  background-color: #333;
-  color: #fff;
-  text-align: center;
-  padding: 15px;
-  font-size: 0.9rem;
-  position: relative;
-  width: 100%;
-}
-
-@media (max-width: 768px) {
-  .main-content {
-    flex-direction: column;
-  }
-
-  .sidebar {
-    flex: 0 0 100%;
-  }
-
-  .content {
-    flex: 0 0 100%;
-  }
-}`;
+const WEB_DEFAULT_CSS = `/* Tambahkan CSS tambahan di sini jika diperlukan */`;
 
 const WEB_DEFAULT_JS = `// JavaScript\nconsole.log("Hello from script.js");`;
 
