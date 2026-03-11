@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, getDocs, onSnapshot, query, limit, startAfter, orderBy, DocumentSnapshot, updateDoc, doc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import EssayGradingView from './EssayGradingView';
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -303,223 +304,170 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   };
 
   const downloadResultsPDF = () => {
-    // Use filtered sessions instead of all sessions
     const sessionsToExport = filteredSessions;
-    
-    const doc = new jsPDF();
-    
-    // Add title
-    doc.setFontSize(18);
-    doc.text(`Hasil Ujian: ${exam.name}`, 14, 22);
-    
-    // Add exam info
-    doc.setFontSize(12);
-    doc.text(`Kode Ujian: ${exam.code}`, 14, 32);
-    doc.text(`Tanggal: ${new Date().toLocaleDateString('id-ID')}`, 14, 42);
-    
-    // Add filter info if any filters are applied
-    let yPos = 52;
+    const pdfDoc = new jsPDF('landscape', 'mm', 'a4');
+    const pageWidth = pdfDoc.internal.pageSize.getWidth();
+
+    pdfDoc.setFillColor(30, 41, 59);
+    pdfDoc.rect(0, 0, pageWidth, 32, 'F');
+
+    pdfDoc.setFontSize(16);
+    pdfDoc.setTextColor(255, 255, 255);
+    pdfDoc.text(`Laporan Hasil Ujian`, 14, 14);
+
+    pdfDoc.setFontSize(10);
+    pdfDoc.setTextColor(200, 210, 230);
+    pdfDoc.text(`${exam.name} | Kode: ${exam.code}`, 14, 22);
+    pdfDoc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 28);
+    pdfDoc.text(`Total Peserta: ${sessionsToExport.length}`, pageWidth - 14, 14, { align: 'right' });
+
     if (searchTerm || filterKelas || filterJurusan) {
-      doc.setFontSize(10);
-      doc.text('Filter yang diterapkan:', 14, yPos);
-      yPos += 6;
-      
-      if (searchTerm) {
-        doc.text(`- Pencarian: "${searchTerm}"`, 14, yPos);
-        yPos += 4;
-      }
-      if (filterKelas) {
-        doc.text(`- Kelas: ${filterKelas}`, 14, yPos);
-        yPos += 4;
-      }
-      if (filterJurusan) {
-        doc.text(`- Jurusan: ${filterJurusan}`, 14, yPos);
-        yPos += 4;
-      }
-      yPos += 4;
+      const filters: string[] = [];
+      if (searchTerm) filters.push(`Cari: "${searchTerm}"`);
+      if (filterKelas) filters.push(`Kelas: ${filterKelas}`);
+      if (filterJurusan) filters.push(`Jurusan: ${filterJurusan}`);
+      pdfDoc.text(`Filter: ${filters.join(' | ')}`, pageWidth - 14, 22, { align: 'right' });
     }
-    
-    doc.text(`Total Siswa: ${sessionsToExport.length}`, 14, yPos);
-    yPos += 10;
-    
-    // Helper function to truncate text if too long
-    const truncateText = (text: string, maxLength: number) => {
-      if (text.length <= maxLength) return text;
-      return text.substring(0, maxLength - 3) + '...';
-    };
-    
-    // Column positions and widths for better spacing
-    const colPositions = [14, 18, 48, 65, 82, 99, 115, 128, 141, 154, 167, 180, 195];
-    const colWidths = [3, 28, 15, 15, 15, 14, 11, 11, 11, 11, 11, 11, 15];
 
-    // Add table headers
-    const headers = ['No', 'Nama', 'NIM', 'Jurusan', 'Kelas', 'Status', 'Warn', 'PG', 'Essay', 'Code', 'Mines', 'Akhir'];
-    let yPosition = yPos;
-    
-    // Draw header background
-    doc.setFillColor(240, 240, 240);
-    doc.rect(14, yPosition - 6, 206, 10, 'F');
-    
-    // Draw header text
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(0, 0, 0);
-    headers.forEach((header, index) => {
-      doc.text(header, colPositions[index], yPosition);
-    });
-    
-    // Draw header border
-    doc.setDrawColor(0, 0, 0);
-    doc.rect(14, yPosition - 6, 206, 10);
-    
-    yPosition += 8;
-    
-    // Helper function to wrap text
-    const wrapText = (text: string, maxWidth: number, fontSize: number) => {
-      doc.setFontSize(fontSize);
-      const words = text.split(' ');
-      const lines = [];
-      let currentLine = '';
-      
-      for (const word of words) {
-        const testLine = currentLine + (currentLine ? ' ' : '') + word;
-        const textWidth = doc.getTextWidth(testLine);
-        
-        if (textWidth > maxWidth && currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
+    const tableBody = sessionsToExport.map((session, idx) => {
+      const essayQ = questions.filter(q => q.type === 'essay');
+      let essayVal = 'N/A';
+      if (essayQ.length > 0) {
+        if (!session.essayScores) {
+          essayVal = 'Belum';
         } else {
-          currentLine = testLine;
+          const vals = Object.values(session.essayScores);
+          if (vals.length === 0) {
+            essayVal = 'Belum';
+          } else {
+            essayVal = (vals.reduce((s, v) => s + (v || 0), 0) / vals.length).toFixed(2);
+          }
         }
       }
-      
-      if (currentLine) {
-        lines.push(currentLine);
+
+      const lcQ = questions.filter(q => q.type === 'livecode');
+      let lcVal = 'N/A';
+      if (lcQ.length > 0) {
+        if (!session.livecodeScores) {
+          lcVal = 'Belum';
+        } else {
+          const vals = Object.values(session.livecodeScores);
+          if (vals.length === 0) {
+            lcVal = 'Belum';
+          } else {
+            lcVal = (vals.reduce((s, v) => s + (v || 0), 0) / vals.length).toFixed(2);
+          }
+        }
       }
-      
-      return lines;
-    };
-    
-    // Draw data rows with alternating colors
-    doc.setFont(undefined, 'normal');
-    doc.setFontSize(9);
-    
-    sessionsToExport.forEach((session, sessionIndex) => {
-      // Prepare row data with text wrapping for name
-      const studentName = session.studentInfo.name || session.studentInfo.fullName || 'N/A';
-      const nameLines = wrapText(studentName, colWidths[1] - 2, 9);
-      const rowHeight = Math.max(12, nameLines.length * 4 + 4);
-      
-      // Alternate row colors
-      if (sessionIndex % 2 === 0) {
-        doc.setFillColor(250, 250, 250);
-        doc.rect(14, yPosition - 4, 206, rowHeight, 'F');
-      }
-      
-      // Draw row border
-      doc.setDrawColor(200, 200, 200);
-      doc.rect(14, yPosition - 4, 206, rowHeight);
-      
-      const rowData = [
-        (sessionIndex + 1).toString(),
-        '', // Name will be handled separately with wrapping
-        truncateText(session.studentInfo.nim || '', 15),
-        truncateText(session.studentInfo.major || '', 15),
-        truncateText(session.studentInfo.className || '', 15),
-        session.status || '',
+
+      return [
+        (idx + 1).toString(),
+        session.studentInfo.name || session.studentInfo.fullName || '-',
+        session.studentInfo.nim || '-',
+        session.studentInfo.major || '-',
+        session.studentInfo.className || '-',
+        session.status || '-',
         session.violations.toString(),
-        session.finalScore?.toFixed(2) ?? 'N/A',
-        (() => {
-          const essayQuestions = questions.filter(q => q.type === 'essay');
-          if (essayQuestions.length === 0) return 'N/A';
-          
-          if (!session.essayScores) return 'Waiting';
-          
-          const essayScoreValues = Object.values(session.essayScores);
-          if (essayScoreValues.length === 0) return 'Waiting';
-          
-          const totalEssayScore = essayScoreValues.reduce((sum, s) => sum + (s || 0), 0);
-          const avgEssayScore = totalEssayScore / essayScoreValues.length;
-          return avgEssayScore.toFixed(2);
-        })(),
-        (() => {
-          const livecodeQuestions = questions.filter(q => q.type === 'livecode');
-          if (livecodeQuestions.length === 0) return 'N/A';
-
-          if (!session.livecodeScores) return 'Wait';
-
-          const livecodeScoreValues = Object.values(session.livecodeScores);
-          if (livecodeScoreValues.length === 0) return 'Wait';
-
-          const totalLivecodeScore = livecodeScoreValues.reduce((sum, s) => sum + (s || 0), 0);
-          const avgLivecodeScore = totalLivecodeScore / livecodeScoreValues.length;
-          return avgLivecodeScore.toFixed(1);
-        })(),
-        (session.scoreReduction || 0).toString(),
-        calculateTotalScore(session)
+        session.finalScore?.toFixed(2) ?? '-',
+        essayVal,
+        lcVal,
+        `-${session.scoreReduction || 0}`,
+        calculateTotalScore(session),
       ];
-      
-      // Check if we need a new page
-      if (yPosition + rowHeight > 270) {
-        doc.addPage();
-        yPosition = 20;
-        
-        // Redraw header on new page
-        doc.setFillColor(240, 240, 240);
-        doc.rect(14, yPosition - 6, 206, 10, 'F');
-        doc.setFont(undefined, 'bold');
-        doc.setFontSize(10);
-        headers.forEach((header, index) => {
-          doc.text(header, colPositions[index], yPosition);
-        });
-        doc.setDrawColor(0, 0, 0);
-        doc.rect(14, yPosition - 6, 206, 10);
-        yPosition += 8;
-        doc.setFont(undefined, 'normal');
-        doc.setFontSize(9);
-        
-        // Recalculate row height for new page
-        const newNameLines = wrapText(session.studentInfo.name || 'N/A', colWidths[1] - 2, 9);
-        const newRowHeight = Math.max(12, newNameLines.length * 4 + 4);
-        
-        // Redraw current row background if needed
-        if (sessionIndex % 2 === 0) {
-          doc.setFillColor(250, 250, 250);
-          doc.rect(14, yPosition - 4, 206, newRowHeight, 'F');
-        }
-        doc.setDrawColor(200, 200, 200);
-        doc.rect(14, yPosition - 4, 206, newRowHeight);
-      }
-      
-      // Draw cell data (except name)
-      doc.setTextColor(0, 0, 0);
-      rowData.forEach((cellData, cellIndex) => {
-        if (cellIndex !== 1) { // Skip name column
-          doc.text(cellData, colPositions[cellIndex], yPosition + 2);
-        }
-      });
-      
-      // Draw wrapped name text
-      nameLines.forEach((line, lineIndex) => {
-        doc.text(line, colPositions[1], yPosition + 2 + (lineIndex * 4));
-      });
-      
-      yPosition += rowHeight;
     });
-    
-    // Add footer
-    const pageCount = doc.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(128, 128, 128);
-      doc.text(`Halaman ${i} dari ${pageCount}`, 14, 285);
-      doc.text(`Dicetak pada: ${new Date().toLocaleString('id-ID')}`, 120, 285);
-    }
-    
-    // Save the PDF
+
+    autoTable(pdfDoc, {
+      startY: 36,
+      head: [['No', 'Nama', 'NIM', 'Jurusan', 'Kelas', 'Status', 'Warn', 'PG', 'Essay', 'Code', 'Mines', 'Akhir']],
+      body: tableBody,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: [255, 255, 255],
+        fontSize: 8,
+        fontStyle: 'bold',
+        halign: 'center',
+        cellPadding: 3,
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        cellPadding: 2.5,
+        textColor: [30, 30, 30],
+      },
+      alternateRowStyles: {
+        fillColor: [241, 245, 249],
+      },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 10 },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 22 },
+        3: { cellWidth: 28 },
+        4: { cellWidth: 18 },
+        5: { halign: 'center', cellWidth: 22 },
+        6: { halign: 'center', cellWidth: 14 },
+        7: { halign: 'center', cellWidth: 16 },
+        8: { halign: 'center', cellWidth: 16 },
+        9: { halign: 'center', cellWidth: 16 },
+        10: { halign: 'center', cellWidth: 16 },
+        11: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
+      },
+      styles: {
+        lineColor: [200, 210, 220],
+        lineWidth: 0.3,
+        overflow: 'linebreak',
+      },
+      willDrawCell: (data: any) => {
+        if (data.section === 'body') {
+          if (data.column.index === 5) {
+            const val = data.cell.raw as string;
+            if (val === 'Diskualifikasi') {
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (val === 'Selesai') {
+              data.cell.styles.textColor = [21, 128, 61];
+            } else if (val === 'Sedang Ujian') {
+              data.cell.styles.textColor = [29, 78, 216];
+            }
+          }
+          if (data.column.index === 6) {
+            const num = parseInt(data.cell.raw as string);
+            if (num >= 5) {
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (num >= 3) {
+              data.cell.styles.textColor = [194, 120, 3];
+            }
+          }
+          if (data.column.index === 11) {
+            const score = parseFloat(data.cell.raw as string);
+            if (score < 50) {
+              data.cell.styles.textColor = [185, 28, 28];
+            } else if (score >= 80) {
+              data.cell.styles.textColor = [21, 128, 61];
+            }
+          }
+        }
+      },
+      didDrawPage: (data: any) => {
+        const pageCount = pdfDoc.getNumberOfPages();
+        pdfDoc.setFontSize(7);
+        pdfDoc.setTextColor(150, 150, 150);
+        pdfDoc.text(
+          `Halaman ${data.pageNumber} dari ${pageCount}`,
+          pageWidth / 2,
+          pdfDoc.internal.pageSize.getHeight() - 8,
+          { align: 'center' }
+        );
+        pdfDoc.text(
+          `${exam.name} - ${exam.code}`,
+          14,
+          pdfDoc.internal.pageSize.getHeight() - 8
+        );
+      },
+    });
+
     const filterSuffix = (searchTerm || filterKelas || filterJurusan) ? '_filtered' : '';
-    doc.save(`Hasil_Ujian_${exam.code}_${new Date().toISOString().split('T')[0]}${filterSuffix}.pdf`);
+    pdfDoc.save(`Hasil_Ujian_${exam.code}_${new Date().toISOString().split('T')[0]}${filterSuffix}.pdf`);
   };
   if (selectedSession) {
     return (
