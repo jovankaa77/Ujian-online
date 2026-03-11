@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, query, limit, startAfter, orderBy, DocumentSnapshot } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 interface ViolationInfo {
   timestamp: string;
@@ -164,6 +166,127 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
     return typeMap[type] || type;
   };
 
+  const generatePDF = () => {
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    doc.setFillColor(30, 41, 59);
+    doc.rect(0, 0, pageWidth, 40, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Laporan Monitoring Pelanggaran Ujian', pageWidth / 2, 16, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${exam.name} (${exam.code})`, pageWidth / 2, 25, { align: 'center' });
+
+    doc.setFontSize(9);
+    doc.setTextColor(200, 200, 200);
+    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}  |  Total Siswa: ${filteredSessions.length}`, pageWidth / 2, 33, { align: 'center' });
+
+    const dataToExport = filteredSessions.map((session, idx) => {
+      const violationsList = getViolationsList(session);
+      const violationCount = Math.min(session.violations || 0, 5);
+
+      const statusText = session.status === 'started'
+        ? 'Sedang Ujian'
+        : session.status === 'finished'
+        ? 'Selesai'
+        : 'Diskualifikasi';
+
+      const violationDetails = violationsList.length > 0
+        ? violationsList.map((v, i) =>
+            `${i + 1}. ${formatViolationType(v.violationType)}\n   ${new Date(v.timestamp).toLocaleString('id-ID')}`
+          ).join('\n')
+        : 'Tidak ada pelanggaran';
+
+      return [
+        idx + 1,
+        session.studentInfo.name + '\n' + session.studentInfo.nim,
+        session.studentInfo.major || '-',
+        statusText,
+        `${violationCount}/5`,
+        violationDetails
+      ];
+    });
+
+    (doc as any).autoTable({
+      startY: 46,
+      head: [['No', 'Nama / NIM', 'Jurusan', 'Status', 'Pelanggaran', 'Daftar Pelanggaran']],
+      body: dataToExport,
+      theme: 'grid',
+      styles: {
+        fontSize: 8,
+        cellPadding: 3,
+        textColor: [30, 30, 30],
+        lineColor: [200, 200, 200],
+        lineWidth: 0.3,
+        valign: 'top',
+      },
+      headStyles: {
+        fillColor: [30, 58, 95],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+        halign: 'center',
+        cellPadding: 4,
+      },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 12 },
+        1: { cellWidth: 50 },
+        2: { cellWidth: 40 },
+        3: { halign: 'center', cellWidth: 30 },
+        4: { halign: 'center', cellWidth: 25 },
+        5: { cellWidth: 'auto' },
+      },
+      alternateRowStyles: {
+        fillColor: [245, 247, 250],
+      },
+      bodyStyles: {
+        fillColor: [255, 255, 255],
+      },
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && data.column.index === 3) {
+          const val = data.cell.raw as string;
+          if (val === 'Diskualifikasi') {
+            data.cell.styles.textColor = [185, 28, 28];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'Sedang Ujian') {
+            data.cell.styles.textColor = [37, 99, 235];
+          } else {
+            data.cell.styles.textColor = [22, 101, 52];
+          }
+        }
+        if (data.section === 'body' && data.column.index === 4) {
+          const count = parseInt(data.cell.raw as string);
+          if (count >= 5) {
+            data.cell.styles.textColor = [185, 28, 28];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (count > 0) {
+            data.cell.styles.textColor = [161, 98, 7];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      },
+      didDrawPage: (data: any) => {
+        const pageCount = (doc as any).internal.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(
+          `Halaman ${data.pageNumber} dari ${pageCount}`,
+          pageWidth / 2,
+          pageHeight - 8,
+          { align: 'center' }
+        );
+      },
+    });
+
+    doc.save(`Laporan_Pelanggaran_${exam.code}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
   if (!exam) {
     return <div className="text-center p-8">Memuat data ujian...</div>;
   }
@@ -210,6 +333,14 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
             className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-blue-400"
           >
             Refresh
+          </button>
+          <button
+            onClick={generatePDF}
+            disabled={filteredSessions.length === 0}
+            className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download PDF
           </button>
         </div>
         {searchTerm && (
