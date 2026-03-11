@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -67,7 +67,7 @@ const MONACO_LANGUAGE_MAP: Record<string, string> = {
 const PISTON_LANGUAGE_MAP: Record<string, string> = {
   python: 'python',
   php: 'php',
-  cpp: 'cpp',
+  cpp: 'c++',
   csharp: 'csharp'
 };
 
@@ -78,12 +78,42 @@ const PISTON_VERSION_MAP: Record<string, string> = {
   csharp: '6.12.0'
 };
 
-const PISTON_FILENAME_MAP: Record<string, string> = {
-  python: 'main.py',
-  php: 'main.php',
-  cpp: 'main.cpp',
-  csharp: 'Main.cs'
-};
+function buildSecureHtml(studentCode: string): string {
+  const securityScript = `<script>
+window.alert = function(msg) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Alert diblokir: ' + msg}, '*'); };
+window.confirm = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Confirm diblokir'}, '*'); return false; };
+window.prompt = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Prompt diblokir'}, '*'); return null; };
+window.open = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Membuka tab baru diblokir demi keamanan ujian!'}, '*'); return null; };
+window.print = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Print diblokir demi keamanan ujian!'}, '*'); };
+Object.defineProperty(window, 'location', { get: function() { return {href:'', assign:function(){}, replace:function(){}, reload:function(){}}; }, set: function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Navigasi diblokir demi keamanan ujian!'}, '*'); } });
+(function() {
+  var origSetInterval = window.setInterval;
+  var origSetTimeout = window.setTimeout;
+  var intervalCount = 0;
+  var maxIntervals = 50;
+  window.setInterval = function(fn, ms) {
+    if (intervalCount >= maxIntervals) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Terlalu banyak interval - kemungkinan infinite loop!'}, '*'); return 0; }
+    intervalCount++;
+    return origSetInterval.call(window, fn, Math.max(ms, 50));
+  };
+  var timeoutCount = 0;
+  var maxTimeouts = 200;
+  window.setTimeout = function(fn, ms) {
+    if (timeoutCount >= maxTimeouts) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Terlalu banyak timeout - kemungkinan infinite loop!'}, '*'); return 0; }
+    timeoutCount++;
+    return origSetTimeout.call(window, fn, ms);
+  };
+})();
+</script>`;
+
+  const hasHtmlStructure = /<html/i.test(studentCode);
+
+  if (hasHtmlStructure) {
+    return studentCode.replace(/<head([^>]*)>/i, `<head$1>${securityScript}`);
+  }
+
+  return `<!DOCTYPE html><html><head>${securityScript}</head><body>${studentCode}</body></html>`;
+}
 
 interface LiveCodeEditorProps {
   questionId: string;
@@ -114,9 +144,10 @@ export default function LiveCodeEditor({
 }: LiveCodeEditorProps) {
   const editorRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [codeOutput, setCodeOutput] = React.useState<{ output: string; error: boolean } | null>(null);
-  const [isRunning, setIsRunning] = React.useState(false);
-  const [htmlPreview, setHtmlPreview] = React.useState(false);
+  const [codeOutput, setCodeOutput] = useState<{ output: string; error: boolean } | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [htmlPreview, setHtmlPreview] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
 
   const currentCode = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
   const showTemplate = !currentCode.trim();
@@ -124,7 +155,7 @@ export default function LiveCodeEditor({
 
   const hasUnsavedChanges = currentDraft !== undefined && currentDraft !== (savedAnswer || '');
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (showTemplate && currentDraft === undefined) {
       const template = CODE_TEMPLATES[language] || '';
       if (template) {
@@ -132,6 +163,17 @@ export default function LiveCodeEditor({
       }
     }
   }, [showTemplate, currentDraft, language, questionId, onDraftChange]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'BLOCKED_ACTION') {
+        setToastMsg(event.data.msg);
+        setTimeout(() => setToastMsg(''), 3000);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
@@ -170,6 +212,15 @@ export default function LiveCodeEditor({
     setCodeOutput({ output: 'Running...', error: false });
 
     try {
+      const mappedLanguage = PISTON_LANGUAGE_MAP[language];
+      const mappedVersion = PISTON_VERSION_MAP[language];
+
+      if (!mappedLanguage || !mappedVersion) {
+        setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
+        setIsRunning(false);
+        return;
+      }
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -180,59 +231,68 @@ export default function LiveCodeEditor({
           'Authorization': `Bearer ${supabaseKey}`
         },
         body: JSON.stringify({
-          language: PISTON_LANGUAGE_MAP[language],
-          version: PISTON_VERSION_MAP[language],
-          files: [{ name: PISTON_FILENAME_MAP[language], content: code }],
-          stdin: '',
-          args: [],
-          compile_timeout: 10000,
-          run_timeout: 5000
+          language: mappedLanguage,
+          version: mappedVersion,
+          files: [{ content: code }]
         }),
         signal: abortController.signal
       });
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`HTTP error! status: ${response.status}${errorText ? ' - ' + errorText : ''}`);
+        throw new Error('Koneksi ke server eksekusi gagal.');
       }
 
-      const result = await response.json();
+      const data = await response.json();
 
-      let output = '';
-      let hasError = false;
+      if (data.compile && data.compile.stderr && data.compile.stderr.trim()) {
+        setCodeOutput({
+          output: 'Compilation Error:\n' + String(data.compile.stderr),
+          error: true
+        });
+        return;
+      }
 
-      if (result.compile && result.compile.stderr) {
-        output = 'Compilation Error:\n' + result.compile.stderr;
-        hasError = true;
-      } else if (result.run) {
-        if (result.run.stderr && result.run.stderr.trim()) {
-          if (result.run.stdout && result.run.stdout.trim()) {
-            output = result.run.stdout + '\n\nStderr:\n' + result.run.stderr;
-          } else {
-            output = 'Error:\n' + result.run.stderr;
-          }
-          hasError = !result.run.stdout || !result.run.stdout.trim();
-        } else if (result.run.stdout && result.run.stdout.trim()) {
-          output = result.run.stdout;
-        } else {
-          output = '(No output)';
-        }
+      let finalOutput = data.run?.stderr && data.run.stderr.trim()
+        ? data.run.stderr
+        : data.run?.stdout;
 
-        if (result.run.signal === 'SIGKILL') {
-          output = 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.';
-          hasError = true;
-        }
+      if (typeof finalOutput === 'object' && finalOutput !== null) {
+        finalOutput = JSON.stringify(finalOutput, null, 2);
+      }
+
+      if (data.run?.signal === 'SIGKILL') {
+        setCodeOutput({
+          output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.',
+          error: true
+        });
+        return;
+      }
+
+      const hasStderr = data.run?.stderr && data.run.stderr.trim();
+      const hasStdout = data.run?.stdout && data.run.stdout.trim();
+
+      if (hasStderr && hasStdout) {
+        setCodeOutput({
+          output: String(data.run.stdout) + '\n\nStderr:\n' + String(data.run.stderr),
+          error: false
+        });
+      } else if (hasStderr) {
+        setCodeOutput({
+          output: 'Error:\n' + String(data.run.stderr),
+          error: true
+        });
       } else {
-        output = 'Execution completed with no output';
+        setCodeOutput({
+          output: finalOutput ? String(finalOutput) : 'Eksekusi berhasil tanpa output.',
+          error: false
+        });
       }
-
-      setCodeOutput({ output, error: hasError });
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
         setCodeOutput({ output: 'Execution stopped by user.', error: true });
       } else {
         setCodeOutput({
-          output: 'Error: ' + e.message + '\n\nPastikan koneksi internet Anda stabil.',
+          output: 'Error: ' + (err.message || 'Terjadi kesalahan yang tidak diketahui.') + '\n\nPastikan koneksi internet Anda stabil.',
           error: true
         });
       }
@@ -246,6 +306,12 @@ export default function LiveCodeEditor({
 
   return (
     <div className="space-y-4">
+      {toastMsg && (
+        <div className="bg-red-900 border border-red-500 text-red-200 px-4 py-3 rounded-md text-sm font-medium animate-pulse">
+          {toastMsg}
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded">
@@ -396,9 +462,12 @@ export default function LiveCodeEditor({
             </button>
           </div>
           <div className="bg-gray-950 p-4 min-h-[80px] max-h-[300px] overflow-auto">
-            <pre className={`text-sm font-mono whitespace-pre-wrap leading-relaxed ${codeOutput.error ? 'text-red-400' : 'text-green-400'}`}>
+            <div
+              className={`text-sm font-mono leading-relaxed ${codeOutput.error ? 'text-red-400' : 'text-green-400'}`}
+              style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}
+            >
               {codeOutput.output}
-            </pre>
+            </div>
           </div>
         </div>
       )}
@@ -416,7 +485,7 @@ export default function LiveCodeEditor({
           </div>
           <div className="bg-white">
             <iframe
-              srcDoc={currentDraft || savedAnswer || ''}
+              srcDoc={buildSecureHtml(currentDraft || savedAnswer || '')}
               title={`HTML Preview ${questionId}`}
               sandbox="allow-scripts"
               className="w-full border-0"
