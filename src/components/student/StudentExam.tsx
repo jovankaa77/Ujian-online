@@ -2111,20 +2111,27 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                     </div>
                   </div>
 
-                  <div className="relative rounded-lg overflow-hidden border border-gray-500 shadow-lg">
+                  <div className="relative rounded-lg overflow-hidden border border-gray-500 shadow-lg cursor-text" onClick={(e) => {
+                    const container = e.currentTarget;
+                    const textarea = container.querySelector('textarea');
+                    if (textarea && e.target !== textarea) {
+                      textarea.focus();
+                    }
+                  }}>
                     <div className="flex">
                       <div className="bg-slate-800 text-gray-500 text-right pr-3 pt-4 pb-4 select-none font-mono text-sm border-r border-gray-600" style={{ lineHeight: '1.5', minWidth: '3rem' }}>
                         {displayCode.split('\n').map((_, i) => (
                           <div key={i} className="px-2">{i + 1}</div>
                         ))}
                       </div>
-                      <div className="flex-1 relative">
+                      <div className="flex-1 relative" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' }}>
                         <div
                           className="absolute top-0 left-0 right-0 bottom-0 overflow-auto p-4 font-mono text-sm pointer-events-none whitespace-pre-wrap"
                           style={{
                             lineHeight: '1.5',
-                            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
+                            zIndex: 1
                           }}
+                          aria-hidden="true"
                         >
                           {highlightCode(displayCode, q.language || 'php')}
                         </div>
@@ -2146,12 +2153,15 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                             }
                           }}
                           placeholder={`Tulis kode ${LANGUAGE_LABELS[q.language || 'php']} Anda di sini...`}
-                          className="w-full p-4 bg-transparent rounded-md h-72 font-mono text-sm text-transparent resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full p-4 bg-transparent h-72 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-text"
                           spellCheck={false}
                           style={{
                             lineHeight: '1.5',
                             caretColor: '#22d3ee',
-                            caretShape: 'bar'
+                            color: 'transparent',
+                            position: 'relative',
+                            zIndex: 2,
+                            WebkitTextFillColor: 'transparent'
                           }}
                         />
                       </div>
