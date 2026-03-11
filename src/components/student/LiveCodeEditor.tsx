@@ -22,39 +22,39 @@ const WEB_DEFAULT_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kerangka Sederhana</title>
-  <style type="text/css">
-    /* Reset dasar untuk menghilangkan margin dan padding default */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    /* Mengatur body secara keseluruhan */
-    body {
-      font-family: 'Arial', sans-serif;
-      line-height: 1.6;
-      background-color: #f4f4f4;
-      color: #333;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-    }
-    h1 {
-      text-align: center;
-    }
-    @media (max-width: 768px) {
-
-    }
-  </style>
 </head>
 <body>
   <h1>Hello world!</h1>
 </body>
 </html>`;
 
-const WEB_DEFAULT_CSS = `/* Tambahkan CSS tambahan di sini jika diperlukan */`;
+const WEB_DEFAULT_CSS = `/* Reset dasar untuk menghilangkan margin dan padding default */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Mengatur body secara keseluruhan */
+body {
+  font-family: 'Arial', sans-serif;
+  line-height: 1.6;
+  background-color: #f4f4f4;
+  color: #333;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+h1 {
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+
+}`;
 
 const WEB_DEFAULT_JS = `// JavaScript\nconsole.log("Hello from script.js");`;
 
