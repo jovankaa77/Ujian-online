@@ -70,6 +70,13 @@ function extractBody(html: string): string {
 function buildPreviewHtml(html: string, css: string, js: string): string {
   return `<html>
 <head>
+<script>
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'SCROLL_PREVIEW') {
+    window.scrollBy(0, e.data.deltaY);
+  }
+});
+</script>
 <style>${css}</style>
 </head>
 <body>
@@ -379,7 +386,18 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                 </button>
               </div>
             </div>
-            <div className="flex-1 bg-gray-100 flex justify-center overflow-auto">
+            <div className="flex-1 bg-gray-100 flex justify-center relative" style={{ overflow: 'hidden' }}>
+              <div
+                className="absolute z-10"
+                style={{ top: 0, left: 0, bottom: 0, right: '16px', pointerEvents: 'auto', cursor: 'default' }}
+                onWheel={(e) => {
+                  e.preventDefault();
+                  const iframe = e.currentTarget.parentElement?.querySelector('iframe') as HTMLIFrameElement | null;
+                  if (iframe?.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
+                  }
+                }}
+              />
               <iframe
                 srcDoc={buildPreviewHtml(html, css, js)}
                 title={`HTML Preview ${q.id}`}
