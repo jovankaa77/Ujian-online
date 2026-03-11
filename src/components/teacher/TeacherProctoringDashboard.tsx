@@ -20,6 +20,8 @@ interface Session {
   violationSnapshot_1?: ViolationInfo;
   violationSnapshot_2?: ViolationInfo;
   violationSnapshot_3?: ViolationInfo;
+  violationSnapshot_4?: ViolationInfo;
+  violationSnapshot_5?: ViolationInfo;
   [key: string]: unknown;
 }
 
@@ -127,7 +129,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
   }, [sessions, searchTerm]);
 
   const getViolationsList = (session: Session): ViolationInfo[] => {
-    const violationCount = Math.min(session.violations || 0, 3);
+    const violationCount = Math.min(session.violations || 0, 5);
     const violations: ViolationInfo[] = [];
 
     for (let i = 1; i <= violationCount; i++) {
@@ -249,7 +251,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredSessions.map(session => {
               const violationsList = getViolationsList(session);
-              const violationCount = Math.min(session.violations || 0, 3);
+              const violationCount = Math.min(session.violations || 0, 5);
               return (
                 <div
                   key={session.id}
@@ -295,10 +297,10 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-semibold text-sm">Jumlah Pelanggaran</span>
                         <span className={`text-xl font-bold ${
-                          violationCount >= 3 ? 'text-red-400' :
+                          violationCount >= 5 ? 'text-red-400' :
                           violationCount > 0 ? 'text-yellow-400' : 'text-green-400'
                         }`}>
-                          {violationCount}/3
+                          {violationCount}/5
                         </span>
                       </div>
 

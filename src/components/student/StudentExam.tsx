@@ -1180,12 +1180,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   };
 
   const handleViolation = (reason = "Unknown") => {
-    if (isFinished || violations >= 3) {
+    if (isFinished || violations >= 5) {
       console.log("Violation ignored - exam finished or max violations reached");
       return;
     }
 
-    const newViolations = Math.min(violations + 1, 3);
+    const newViolations = Math.min(violations + 1, 5);
     setViolations(newViolations);
     setViolationReason(reason);
 
@@ -1212,7 +1212,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
 
     playWarningSound();
 
-    if (newViolations >= 3) {
+    if (newViolations >= 5) {
       finishExam(`Diskualifikasi: ${reason}`);
     } else {
       setShowViolationModal(true);
@@ -1387,7 +1387,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   if (isFinished) {
     return (
       <div className="text-center h-screen flex flex-col justify-center items-center -mt-16">
-        {finalScore === 0 && violations >= 3 ? (
+        {finalScore === 0 && violations >= 5 ? (
           <>
             <h2 className="text-4xl font-bold text-red-500 mb-4">Ujian Dihentikan!</h2>
             <p className="text-xl text-gray-300">
@@ -1460,7 +1460,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             <p className="text-lg mt-2">Pelanggaran Terdeteksi: {violationReason}</p>
             <p className="text-sm text-red-400 mt-1">Sistem monitoring aktif!</p>
             <p className="text-2xl font-bold mt-2">
-              Kesempatan tersisa: <span className="text-white">{3 - violations}</span>
+              Kesempatan tersisa: <span className="text-white">{5 - violations}</span>
             </p>
             <p className="text-sm text-gray-400 mt-2">
               Foto telah diambil sebagai bukti pelanggaran
@@ -1557,7 +1557,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         </div>
         
         <div className="text-xs text-gray-400 mb-2">
-          Jumlah Pelanggaran: {violations}/3
+          Jumlah Pelanggaran: {violations}/5
         </div>
         <div className="text-xs text-blue-400 mb-2">
           📸 Foto Absen: {attendancePhotoCount}
