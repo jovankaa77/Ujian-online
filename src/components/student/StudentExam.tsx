@@ -1034,7 +1034,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     
     const handleBlur = () => {
       if (!isFinished) {
-        handleViolation("Focus Lost");
+        setTimeout(() => {
+          if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
+            return;
+          }
+          handleViolation("Focus Lost");
+        }, 50);
       }
     };
     

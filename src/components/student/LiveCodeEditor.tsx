@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -83,36 +83,27 @@ function buildSecureHtml(studentCode: string): string {
 window.alert = function(msg) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Alert diblokir: ' + msg}, '*'); };
 window.confirm = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Confirm diblokir'}, '*'); return false; };
 window.prompt = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Prompt diblokir'}, '*'); return null; };
-window.open = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Membuka tab baru diblokir demi keamanan ujian!'}, '*'); return null; };
-window.print = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Print diblokir demi keamanan ujian!'}, '*'); };
-Object.defineProperty(window, 'location', { get: function() { return {href:'', assign:function(){}, replace:function(){}, reload:function(){}}; }, set: function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Navigasi diblokir demi keamanan ujian!'}, '*'); } });
-(function() {
-  var origSetInterval = window.setInterval;
-  var origSetTimeout = window.setTimeout;
-  var intervalCount = 0;
-  var maxIntervals = 50;
-  window.setInterval = function(fn, ms) {
-    if (intervalCount >= maxIntervals) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Terlalu banyak interval - kemungkinan infinite loop!'}, '*'); return 0; }
-    intervalCount++;
-    return origSetInterval.call(window, fn, Math.max(ms, 50));
-  };
-  var timeoutCount = 0;
-  var maxTimeouts = 200;
-  window.setTimeout = function(fn, ms) {
-    if (timeoutCount >= maxTimeouts) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Terlalu banyak timeout - kemungkinan infinite loop!'}, '*'); return 0; }
-    timeoutCount++;
-    return origSetTimeout.call(window, fn, ms);
-  };
-})();
-</script>`;
+window.open = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Membuka tab baru diblokir demi keamanan!'}, '*'); return null; };
+window.print = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Fitur Print diblokir!'}, '*'); };
+var logCount = 0;
+var origLog = console.log;
+console.log = function() {
+  if (logCount < 50) { logCount++; origLog.apply(console, arguments); }
+};
+</script>
+<style>body { font-family: sans-serif; word-wrap: break-word; }</style>`;
 
   const hasHtmlStructure = /<html/i.test(studentCode);
 
   if (hasHtmlStructure) {
-    return studentCode.replace(/<head([^>]*)>/i, `<head$1>${securityScript}`);
+    const hasHead = /<head([^>]*)>/i.test(studentCode);
+    if (hasHead) {
+      return studentCode.replace(/<head([^>]*)>/i, `<head$1>${securityScript}`);
+    }
+    return studentCode.replace(/<html([^>]*)>/i, `<html$1><head>${securityScript}</head>`);
   }
 
-  return `<!DOCTYPE html><html><head>${securityScript}</head><body>${studentCode}</body></html>`;
+  return `<html><head>${securityScript}</head><body>${studentCode}</body></html>`;
 }
 
 interface LiveCodeEditorProps {
@@ -152,8 +143,8 @@ export default function LiveCodeEditor({
   const currentCode = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
   const showTemplate = !currentCode.trim();
   const displayCode = showTemplate ? (CODE_TEMPLATES[language] || '') : currentCode;
-
   const hasUnsavedChanges = currentDraft !== undefined && currentDraft !== (savedAnswer || '');
+  const isHtml = language === 'htmlcss';
 
   useEffect(() => {
     if (showTemplate && currentDraft === undefined) {
@@ -200,7 +191,7 @@ export default function LiveCodeEditor({
       return;
     }
 
-    if (language === 'htmlcss') {
+    if (isHtml) {
       setHtmlPreview(true);
       setCodeOutput(null);
       return;
@@ -300,21 +291,22 @@ export default function LiveCodeEditor({
       setIsRunning(false);
       abortControllerRef.current = null;
     }
-  }, [currentDraft, savedAnswer, language]);
+  }, [currentDraft, savedAnswer, language, isHtml]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
+  const showHtmlSplitView = isHtml && htmlPreview;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {toastMsg && (
-        <div className="bg-red-900 border border-red-500 text-red-200 px-4 py-3 rounded-md text-sm font-medium animate-pulse">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-red-600 text-white px-5 py-3 rounded-lg shadow-2xl text-sm font-semibold animate-pulse border border-red-400">
           {toastMsg}
         </div>
       )}
 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded">
+          <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded font-medium">
             {LANGUAGE_LABELS[language] || language}
           </span>
           <button
@@ -322,7 +314,7 @@ export default function LiveCodeEditor({
               const template = CODE_TEMPLATES[language] || '';
               onDraftChange(questionId, template);
             }}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded"
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors"
             title="Load Hello World template"
           >
             Reset Template
@@ -342,68 +334,100 @@ export default function LiveCodeEditor({
         </div>
       </div>
 
-      <div className="rounded-lg overflow-hidden border border-gray-600 shadow-lg">
-        <Editor
-          height="400px"
-          language={monacoLang}
-          value={displayCode}
-          onChange={handleEditorChange}
-          onMount={handleEditorMount}
-          theme="vs-dark"
-          options={{
-            minimap: { enabled: false },
-            cursorStyle: 'line',
-            mouseStyle: 'text',
-            fontSize: 14,
-            lineHeight: 22,
-            padding: { top: 12, bottom: 12 },
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            tabSize: 4,
-            wordWrap: 'on',
-            renderLineHighlight: 'line',
-            selectOnLineNumbers: true,
-            roundedSelection: true,
-            cursorBlinking: 'smooth',
-            cursorSmoothCaretAnimation: 'on',
-            smoothScrolling: true,
-            contextmenu: false,
-            folding: true,
-            lineNumbersMinChars: 3,
-            glyphMargin: false,
-            suggest: { showSnippets: false, showWords: false },
-            quickSuggestions: false,
-            parameterHints: { enabled: false },
-          }}
-        />
+      <div className={showHtmlSplitView ? 'flex gap-3' : ''} style={showHtmlSplitView ? { minHeight: '480px' } : undefined}>
+        <div className={showHtmlSplitView ? 'w-1/2 flex flex-col' : ''}>
+          <div className="rounded-lg overflow-hidden border border-gray-600 shadow-lg flex-1">
+            <Editor
+              height={showHtmlSplitView ? '480px' : '400px'}
+              language={monacoLang}
+              value={displayCode}
+              onChange={handleEditorChange}
+              onMount={handleEditorMount}
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                wordWrap: 'on',
+                cursorStyle: 'line',
+                mouseStyle: 'text',
+                fontSize: 14,
+                lineHeight: 22,
+                padding: { top: 12, bottom: 12 },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 4,
+                renderLineHighlight: 'line',
+                selectOnLineNumbers: true,
+                roundedSelection: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                smoothScrolling: true,
+                contextmenu: false,
+                folding: true,
+                lineNumbersMinChars: 3,
+                glyphMargin: false,
+                suggest: { showSnippets: false, showWords: false },
+                quickSuggestions: false,
+                parameterHints: { enabled: false },
+              }}
+            />
+          </div>
+        </div>
+
+        {showHtmlSplitView && (
+          <div className="w-1/2 flex flex-col">
+            <div className="rounded-lg border border-gray-500 overflow-hidden flex-1 flex flex-col">
+              <div className="flex items-center justify-between bg-gray-700 px-4 py-2 border-b border-gray-600 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-green-400" />
+                  <span className="text-sm font-bold text-gray-300">Live Preview</span>
+                </div>
+                <button
+                  onClick={() => setHtmlPreview(false)}
+                  className="text-gray-400 hover:text-white text-xs transition-colors"
+                >
+                  Tutup
+                </button>
+              </div>
+              <div className="bg-white flex-1 relative">
+                <iframe
+                  srcDoc={buildSecureHtml(currentDraft || savedAnswer || '')}
+                  title={`HTML Preview ${questionId}`}
+                  sandbox="allow-scripts"
+                  className="w-full h-full border-0"
+                  style={{ minHeight: '440px', pointerEvents: 'none' }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 flex-wrap">
         <button
           onClick={() => onSave(questionId)}
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors"
+          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors text-sm"
         >
           Simpan Kode
         </button>
         <button
           onClick={() => onCancel(questionId)}
-          className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded transition-colors"
+          className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded transition-colors text-sm"
         >
           Batalkan Perubahan
         </button>
         {isRunning ? (
           <button
             onClick={stopRunning}
-            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded animate-pulse transition-colors"
+            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded animate-pulse transition-colors text-sm"
           >
             Stop Running
           </button>
         ) : (
           <button
             onClick={runCode}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors text-sm"
           >
-            {language === 'htmlcss' ? 'Preview' : 'Run Code'}
+            {isHtml ? (htmlPreview ? 'Refresh Preview' : 'Preview') : 'Run Code'}
           </button>
         )}
       </div>
@@ -447,7 +471,7 @@ export default function LiveCodeEditor({
         </div>
       )}
 
-      {codeOutput && (
+      {codeOutput && !isHtml && (
         <div className="rounded-lg overflow-hidden border border-gray-600">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
             <div className="flex items-center gap-2">
@@ -456,7 +480,7 @@ export default function LiveCodeEditor({
             </div>
             <button
               onClick={() => setCodeOutput(null)}
-              className="text-gray-400 hover:text-white text-sm transition-colors"
+              className="text-gray-400 hover:text-white text-xs transition-colors"
             >
               Tutup
             </button>
@@ -468,29 +492,6 @@ export default function LiveCodeEditor({
             >
               {codeOutput.output}
             </div>
-          </div>
-        </div>
-      )}
-
-      {language === 'htmlcss' && htmlPreview && (
-        <div className="rounded-lg border border-gray-500 overflow-hidden">
-          <div className="flex items-center justify-between bg-gray-700 px-4 py-2">
-            <span className="text-sm font-bold text-gray-300">Preview HTML & CSS</span>
-            <button
-              onClick={() => setHtmlPreview(false)}
-              className="text-gray-400 hover:text-white text-sm"
-            >
-              Tutup
-            </button>
-          </div>
-          <div className="bg-white">
-            <iframe
-              srcDoc={buildSecureHtml(currentDraft || savedAnswer || '')}
-              title={`HTML Preview ${questionId}`}
-              sandbox="allow-scripts"
-              className="w-full border-0"
-              style={{ minHeight: '300px', height: '400px' }}
-            />
           </div>
         </div>
       )}
