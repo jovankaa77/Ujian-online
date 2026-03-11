@@ -12,6 +12,7 @@
     "build:vercel": "npm run build"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@ricky0123/vad-web": "^0.0.27",
     "face-api.js": "^0.22.2",
     "firebase": "^12.1.0",
