@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
+import Editor from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
@@ -37,6 +38,47 @@ interface EssayGradingViewProps {
   onBack: () => void;
 }
 
+const WEB_SEPARATOR = '\n<!--__WEB_TAB_SEPARATOR__-->\n';
+
+type WebTab = 'html' | 'css' | 'js';
+type PreviewMode = 'desktop' | 'mobile';
+
+function deserializeWebTabs(combined: string): { html: string; css: string; js: string } {
+  const parts = combined.split(WEB_SEPARATOR);
+  return {
+    html: parts[0] || '',
+    css: parts[1] || '',
+    js: parts[2] || '',
+  };
+}
+
+function extractBody(html: string): string {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) return bodyMatch[1];
+  const hasHtml = /<html/i.test(html);
+  if (hasHtml) {
+    return html
+      .replace(/<html[^>]*>/i, '')
+      .replace(/<\/html>/i, '')
+      .replace(/<head[\s\S]*?<\/head>/i, '')
+      .replace(/<body[^>]*>/i, '')
+      .replace(/<\/body>/i, '');
+  }
+  return html;
+}
+
+function buildPreviewHtml(html: string, css: string, js: string): string {
+  return `<html>
+<head>
+<style>${css}</style>
+</head>
+<body>
+${extractBody(html)}
+<script>${js}<\/script>
+</body>
+</html>`;
+}
+
 const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions, examId, navigateBack, onBack }) => {
   const essayQuestions = questions.filter(q => q.type === 'essay');
   const livecodeQuestions = questions.filter(q => q.type === 'livecode');
@@ -46,6 +88,8 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [codeOutputs, setCodeOutputs] = useState<{ [key: string]: { output: string; error: boolean } }>({});
   const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
   const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
+  const [htmlActiveTabs, setHtmlActiveTabs] = useState<{ [key: string]: WebTab }>({});
+  const [htmlPreviewModes, setHtmlPreviewModes] = useState<{ [key: string]: PreviewMode }>({});
   const abortControllersRef = useRef<{ [key: string]: AbortController }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
@@ -224,6 +268,141 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
 
   const studentName = session.studentInfo.name || session.studentInfo.fullName || 'N/A';
 
+  const getActiveTab = (qId: string): WebTab => htmlActiveTabs[qId] || 'html';
+  const getPreviewMode = (qId: string): PreviewMode => htmlPreviewModes[qId] || 'desktop';
+
+  const tabEditorLanguage: Record<WebTab, string> = { html: 'html', css: 'css', js: 'javascript' };
+
+  const tabConfig: { key: WebTab; label: string; icon: string }[] = [
+    { key: 'html', label: 'HTML', icon: 'H' },
+    { key: 'css', label: 'CSS', icon: 'C' },
+    { key: 'js', label: 'JS', icon: 'J' },
+  ];
+
+  const tabColorMap: Record<WebTab, string> = {
+    html: 'text-orange-400',
+    css: 'text-blue-400',
+    js: 'text-yellow-400',
+  };
+
+  const renderHtmlCssPreview = (q: Question) => {
+    const rawAnswer = session.answers[q.id] || '';
+    const { html, css, js } = deserializeWebTabs(rawAnswer);
+    const activeTab = getActiveTab(q.id);
+    const previewMode = getPreviewMode(q.id);
+
+    const editorValues: Record<WebTab, string> = { html, css, js };
+
+    return (
+      <div className="mt-3 rounded-lg border border-gray-600 overflow-hidden bg-gray-900">
+        <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
+          <span className="text-sm font-bold text-gray-300">Preview HTML & CSS</span>
+          <button
+            onClick={() => setHtmlPreviews(prev => {
+              const newPreviews = { ...prev };
+              delete newPreviews[q.id];
+              return newPreviews;
+            })}
+            className="text-gray-400 hover:text-white text-sm transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
+
+        <div className="flex" style={{ height: '500px' }}>
+          <div className="w-1/2 flex flex-col border-r border-gray-600">
+            <div className="flex bg-gray-850 border-b border-gray-600 shrink-0">
+              {tabConfig.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setHtmlActiveTabs(prev => ({ ...prev, [q.id]: tab.key }))}
+                  className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+                    activeTab === tab.key
+                      ? `bg-gray-900 ${tabColorMap[tab.key]} border-current`
+                      : 'text-gray-400 border-transparent hover:text-gray-200 hover:bg-gray-800'
+                  }`}
+                >
+                  <span className={`text-xs font-bold w-5 h-5 rounded flex items-center justify-center ${
+                    activeTab === tab.key ? 'bg-gray-700' : 'bg-gray-700/50'
+                  } ${tabColorMap[tab.key]}`}>
+                    {tab.icon}
+                  </span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <Editor
+                height="100%"
+                language={tabEditorLanguage[activeTab]}
+                value={editorValues[activeTab]}
+                theme="vs-dark"
+                options={{
+                  readOnly: true,
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  padding: { top: 8 },
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="w-1/2 flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-600 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-red-500" />
+                  <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                  <div className="w-2 h-2 rounded-full bg-green-500" />
+                </div>
+                <span className="text-xs font-bold text-gray-400">Live Preview</span>
+              </div>
+              <div className="flex bg-gray-700 rounded overflow-hidden">
+                <button
+                  onClick={() => setHtmlPreviewModes(prev => ({ ...prev, [q.id]: 'desktop' }))}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    previewMode === 'desktop' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Desktop
+                </button>
+                <button
+                  onClick={() => setHtmlPreviewModes(prev => ({ ...prev, [q.id]: 'mobile' }))}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    previewMode === 'mobile' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Mobile
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-gray-100 flex justify-center overflow-auto">
+              <iframe
+                srcDoc={buildPreviewHtml(html, css, js)}
+                title={`HTML Preview ${q.id}`}
+                sandbox="allow-scripts"
+                className="border-0 bg-white transition-all duration-300"
+                style={{
+                  width: previewMode === 'mobile' ? '375px' : '100%',
+                  height: '100%',
+                  minHeight: '100%',
+                  ...(previewMode === 'mobile' ? {
+                    boxShadow: '0 0 0 8px #1f2937, 0 0 0 10px #374151, 0 8px 32px rgba(0,0,0,0.3)',
+                    borderRadius: '12px',
+                    margin: '12px 0',
+                  } : {}),
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div>
       <button
@@ -242,7 +421,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
         {essayQuestions.length > 0 && (
           <div>
             <h4 className="text-xl font-bold text-blue-400 mb-4">Soal Esai</h4>
-            {essayQuestions.map((q, idx) => {
+            {essayQuestions.map((q) => {
               const qIndex = questions.findIndex(question => question.id === q.id);
               return (
                 <div key={q.id} className="bg-gray-800 p-6 rounded-lg mb-4">
@@ -290,8 +469,9 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
         {livecodeQuestions.length > 0 && (
           <div>
             <h4 className="text-xl font-bold text-teal-400 mb-4">Soal Live Code</h4>
-            {livecodeQuestions.map((q, idx) => {
+            {livecodeQuestions.map((q) => {
               const qIndex = questions.findIndex(question => question.id === q.id);
+              const isHtmlCss = q.language === 'htmlcss';
               return (
                 <div key={q.id} className="bg-gray-800 p-6 rounded-lg mb-4">
                   <div className="flex items-center gap-3 mb-3">
@@ -306,31 +486,33 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                     <img src={q.image} alt="Soal" className="max-h-40 mt-2 rounded" />
                   )}
 
-                  <div className="mt-3">
-                    <p className="text-sm text-gray-400 mb-2">Kode Siswa:</p>
-                    {session.answers[q.id] ? (
-                      <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
-                        <div className="flex">
-                          <div className="bg-slate-800 text-gray-500 text-right pr-3 py-4 select-none font-mono text-sm border-r border-gray-600" style={{ lineHeight: '1.5', minWidth: '3rem' }}>
-                            {session.answers[q.id].split('\n').map((_: string, i: number) => (
-                              <div key={i} className="px-2">{i + 1}</div>
-                            ))}
+                  {!isHtmlCss && (
+                    <div className="mt-3">
+                      <p className="text-sm text-gray-400 mb-2">Kode Siswa:</p>
+                      {session.answers[q.id] ? (
+                        <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
+                          <div className="flex">
+                            <div className="bg-slate-800 text-gray-500 text-right pr-3 py-4 select-none font-mono text-sm border-r border-gray-600" style={{ lineHeight: '1.5', minWidth: '3rem' }}>
+                              {session.answers[q.id].split('\n').map((_: string, i: number) => (
+                                <div key={i} className="px-2">{i + 1}</div>
+                              ))}
+                            </div>
+                            <pre
+                              className="flex-1 p-4 text-sm font-mono overflow-x-auto whitespace-pre-wrap text-gray-200"
+                              style={{
+                                lineHeight: '1.5',
+                                background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
+                              }}
+                            >
+                              {session.answers[q.id]}
+                            </pre>
                           </div>
-                          <pre
-                            className="flex-1 p-4 text-sm font-mono overflow-x-auto whitespace-pre-wrap text-gray-200"
-                            style={{
-                              lineHeight: '1.5',
-                              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
-                            }}
-                          >
-                            {session.answers[q.id]}
-                          </pre>
                         </div>
-                      </div>
-                    ) : (
-                      <p className="p-4 bg-gray-900 rounded-md text-gray-500">(Tidak dijawab)</p>
-                    )}
-                  </div>
+                      ) : (
+                        <p className="p-4 bg-gray-900 rounded-md text-gray-500">(Tidak dijawab)</p>
+                      )}
+                    </div>
+                  )}
 
                   {session.answers[q.id] && (
                     <div className="mt-3">
@@ -347,7 +529,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                             onClick={() => runStudentCode(q.id, q.language || 'php')}
                             className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
                           >
-                            {q.language === 'htmlcss' ? 'Preview' : 'Run Code'}
+                            {isHtmlCss ? (htmlPreviews[q.id] ? 'Refresh Preview' : 'Preview') : 'Run Code'}
                           </button>
                         )}
                       </div>
@@ -373,32 +555,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                         </div>
                       )}
 
-                      {(q.language === 'htmlcss') && htmlPreviews[q.id] && (
-                        <div className="mt-3 rounded-lg border border-gray-500 overflow-hidden">
-                          <div className="flex items-center justify-between bg-gray-700 px-4 py-2">
-                            <span className="text-sm font-bold text-gray-300">Preview HTML & CSS</span>
-                            <button
-                              onClick={() => setHtmlPreviews(prev => {
-                                const newPreviews = { ...prev };
-                                delete newPreviews[q.id];
-                                return newPreviews;
-                              })}
-                              className="text-gray-400 hover:text-white text-sm"
-                            >
-                              Tutup
-                            </button>
-                          </div>
-                          <div className="bg-white">
-                            <iframe
-                              srcDoc={session.answers[q.id] || ''}
-                              title={`HTML Preview ${q.id}`}
-                              sandbox="allow-scripts"
-                              className="w-full border-0"
-                              style={{ minHeight: '300px', height: '400px' }}
-                            />
-                          </div>
-                        </div>
-                      )}
+                      {isHtmlCss && htmlPreviews[q.id] && renderHtmlCssPreview(q)}
                     </div>
                   )}
 

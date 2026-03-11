@@ -846,18 +846,7 @@ function WebModeLayout({
               </div>
             </div>
 
-            <div className="flex-1 bg-gray-100 flex justify-center relative" style={{ minHeight: `${previewHeight - 44}px`, overflow: 'hidden' }}>
-              <div
-                className="absolute inset-0 z-10"
-                style={{ pointerEvents: 'auto', cursor: 'default' }}
-                onWheel={(e) => {
-                  e.preventDefault();
-                  const iframe = e.currentTarget.nextElementSibling as HTMLIFrameElement | null;
-                  if (iframe?.contentWindow) {
-                    iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
-                  }
-                }}
-              />
+            <div className="flex-1 bg-gray-100 flex justify-center overflow-auto" style={{ minHeight: `${previewHeight - 44}px` }}>
               <iframe
                 srcDoc={buildSecureWebPreview(webHtml, webCss, webJs)}
                 title={`Web Preview ${questionId}`}
@@ -867,7 +856,6 @@ function WebModeLayout({
                   width: previewMode === 'mobile' ? '375px' : '100%',
                   height: '100%',
                   minHeight: `${previewHeight - 44}px`,
-                  pointerEvents: 'none',
                   ...(previewMode === 'mobile' ? {
                     boxShadow: '0 0 0 8px #1f2937, 0 0 0 10px #374151, 0 8px 32px rgba(0,0,0,0.3)',
                     borderRadius: '12px',
