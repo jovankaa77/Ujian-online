@@ -245,6 +245,11 @@ var origLog = console.log;
 console.log = function() {
   if (logCount < 50) { logCount++; origLog.apply(console, arguments); }
 };
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'SCROLL_PREVIEW') {
+    window.scrollBy(0, e.data.deltaY);
+  }
+});
 </script>
 <style>${css}</style>
 </head>
@@ -846,9 +851,10 @@ function WebModeLayout({
                 className="absolute inset-0 z-10"
                 style={{ pointerEvents: 'auto', cursor: 'default' }}
                 onWheel={(e) => {
+                  e.preventDefault();
                   const iframe = e.currentTarget.nextElementSibling as HTMLIFrameElement | null;
                   if (iframe?.contentWindow) {
-                    iframe.contentWindow.scrollBy(0, e.deltaY);
+                    iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
                   }
                 }}
               />
