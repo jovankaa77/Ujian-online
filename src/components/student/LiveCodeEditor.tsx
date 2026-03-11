@@ -841,7 +841,17 @@ function WebModeLayout({
               </div>
             </div>
 
-            <div className="flex-1 bg-gray-100 overflow-auto flex justify-center" style={{ minHeight: `${previewHeight - 44}px` }}>
+            <div className="flex-1 bg-gray-100 flex justify-center relative" style={{ minHeight: `${previewHeight - 44}px`, overflow: 'hidden' }}>
+              <div
+                className="absolute inset-0 z-10"
+                style={{ pointerEvents: 'auto', cursor: 'default' }}
+                onWheel={(e) => {
+                  const iframe = e.currentTarget.nextElementSibling as HTMLIFrameElement | null;
+                  if (iframe?.contentWindow) {
+                    iframe.contentWindow.scrollBy(0, e.deltaY);
+                  }
+                }}
+              />
               <iframe
                 srcDoc={buildSecureWebPreview(webHtml, webCss, webJs)}
                 title={`Web Preview ${questionId}`}
