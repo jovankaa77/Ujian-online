@@ -767,11 +767,9 @@ function WebModeLayout({
   questionId: string;
   setHtmlPreview: (v: boolean) => void;
 }) {
-  const previewHeight = 520;
-
   return (
-    <div className={showPreview ? 'flex gap-3' : ''} style={showPreview ? { minHeight: `${previewHeight}px` } : undefined}>
-      <div className={showPreview ? 'w-1/2 flex flex-col' : ''}>
+    <div className="space-y-3">
+      <div>
         <div className="flex border-b border-gray-600 bg-gray-800 rounded-t-lg overflow-hidden">
           {webTabItems.map((tab) => (
             <button
@@ -793,9 +791,9 @@ function WebModeLayout({
           ))}
         </div>
 
-        <div className="rounded-b-lg overflow-hidden border border-t-0 border-gray-600 shadow-lg flex-1">
+        <div className="rounded-b-lg overflow-hidden border border-t-0 border-gray-600 shadow-lg">
           <Editor
-            height={showPreview ? `${previewHeight - 40}px` : '400px'}
+            height="400px"
             language={editorLanguage}
             value={editorValue}
             onChange={onEditorChange}
@@ -807,79 +805,76 @@ function WebModeLayout({
       </div>
 
       {showPreview && (
-        <div className="w-1/2 flex flex-col">
-          <div className="rounded-lg border border-gray-500 overflow-hidden flex-1 flex flex-col bg-gray-800">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-gray-600 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                </div>
-                <span className="text-sm font-bold text-gray-300">Live Preview</span>
+        <div className="rounded-lg border border-gray-500 overflow-hidden flex flex-col bg-gray-800">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-600 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
               </div>
-              <div className="flex items-center gap-2">
-                <div className="flex bg-gray-700 rounded overflow-hidden">
-                  <button
-                    onClick={() => setPreviewMode('desktop')}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      previewMode === 'desktop' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Desktop
-                  </button>
-                  <button
-                    onClick={() => setPreviewMode('mobile')}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      previewMode === 'mobile' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Mobile
-                  </button>
-                </div>
+              <span className="text-sm font-bold text-gray-300">Live Preview</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex bg-gray-700 rounded overflow-hidden">
                 <button
-                  onClick={() => setHtmlPreview(false)}
-                  className="text-gray-400 hover:text-white text-xs transition-colors ml-1"
+                  onClick={() => setPreviewMode('desktop')}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    previewMode === 'desktop' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
                 >
-                  Tutup
+                  Desktop
+                </button>
+                <button
+                  onClick={() => setPreviewMode('mobile')}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    previewMode === 'mobile' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Mobile
                 </button>
               </div>
+              <button
+                onClick={() => setHtmlPreview(false)}
+                className="text-gray-400 hover:text-white text-xs transition-colors ml-1"
+              >
+                Tutup
+              </button>
             </div>
+          </div>
 
-            <div className="flex-1 bg-gray-100 flex justify-center relative" style={{ minHeight: `${previewHeight - 44}px`, overflow: 'hidden' }}>
-              <div
-                className="absolute inset-0"
-                style={{ zIndex: 50, background: 'transparent', cursor: 'default' }}
-                onWheel={(e) => {
-                  e.preventDefault();
-                  const iframe = e.currentTarget.parentElement?.querySelector('iframe') as HTMLIFrameElement | null;
-                  if (iframe?.contentWindow) {
-                    iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
-                  }
-                }}
-                onClick={(e) => e.preventDefault()}
-                onMouseDown={(e) => e.preventDefault()}
-                onTouchStart={(e) => e.preventDefault()}
-                onContextMenu={(e) => e.preventDefault()}
-              />
-              <iframe
-                srcDoc={buildSecureWebPreview(webHtml, webCss, webJs)}
-                title={`Web Preview ${questionId}`}
-                sandbox="allow-scripts"
-                className="border-0 bg-white transition-all duration-300"
-                style={{
-                  width: previewMode === 'mobile' ? '375px' : '100%',
-                  height: '100%',
-                  minHeight: `${previewHeight - 44}px`,
-                  pointerEvents: 'none',
-                  ...(previewMode === 'mobile' ? {
-                    boxShadow: '0 0 0 8px #1f2937, 0 0 0 10px #374151, 0 8px 32px rgba(0,0,0,0.3)',
-                    borderRadius: '12px',
-                    margin: '12px 0',
-                  } : {}),
-                }}
-              />
-            </div>
+          <div className="bg-gray-100 flex justify-center relative" style={{ height: '480px', overflow: 'hidden' }}>
+            <div
+              className="absolute inset-0"
+              style={{ zIndex: 50, background: 'transparent', cursor: 'default' }}
+              onWheel={(e) => {
+                e.preventDefault();
+                const iframe = e.currentTarget.parentElement?.querySelector('iframe') as HTMLIFrameElement | null;
+                if (iframe?.contentWindow) {
+                  iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
+                }
+              }}
+              onClick={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
+            />
+            <iframe
+              srcDoc={buildSecureWebPreview(webHtml, webCss, webJs)}
+              title={`Web Preview ${questionId}`}
+              sandbox="allow-scripts"
+              className="border-0 bg-white transition-all duration-300"
+              style={{
+                width: previewMode === 'mobile' ? '375px' : '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                ...(previewMode === 'mobile' ? {
+                  boxShadow: '0 0 0 8px #1f2937, 0 0 0 10px #374151, 0 8px 32px rgba(0,0,0,0.3)',
+                  borderRadius: '12px',
+                  margin: '12px 0',
+                } : {}),
+              }}
+            />
           </div>
         </div>
       )}
