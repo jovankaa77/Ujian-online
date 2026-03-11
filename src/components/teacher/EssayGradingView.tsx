@@ -388,8 +388,8 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
             </div>
             <div className="flex-1 bg-gray-100 flex justify-center relative" style={{ overflow: 'hidden' }}>
               <div
-                className="absolute z-10"
-                style={{ top: 0, left: 0, bottom: 0, right: '16px', pointerEvents: 'auto', cursor: 'default' }}
+                className="absolute inset-0"
+                style={{ zIndex: 50, background: 'transparent', cursor: 'default' }}
                 onWheel={(e) => {
                   e.preventDefault();
                   const iframe = e.currentTarget.parentElement?.querySelector('iframe') as HTMLIFrameElement | null;
@@ -397,6 +397,10 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                     iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
                   }
                 }}
+                onClick={(e) => e.preventDefault()}
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
+                onContextMenu={(e) => e.preventDefault()}
               />
               <iframe
                 srcDoc={buildPreviewHtml(html, css, js)}
@@ -407,6 +411,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                   width: previewMode === 'mobile' ? '375px' : '100%',
                   height: '100%',
                   minHeight: '100%',
+                  pointerEvents: 'none',
                   ...(previewMode === 'mobile' ? {
                     boxShadow: '0 0 0 8px #1f2937, 0 0 0 10px #374151, 0 8px 32px rgba(0,0,0,0.3)',
                     borderRadius: '12px',
