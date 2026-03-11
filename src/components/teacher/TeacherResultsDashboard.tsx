@@ -5,11 +5,11 @@ import jsPDF from 'jspdf';
 import EssayGradingView from './EssayGradingView';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  html: 'HTML',
-  javascript: 'JavaScript',
   php: 'PHP',
   cpp: 'C++',
-  python: 'Python'
+  python: 'Python',
+  csharp: 'C#',
+  htmlcss: 'HTML & CSS'
 };
 
 interface Question {

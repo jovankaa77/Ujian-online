@@ -1,13 +1,14 @@
 import React, { useState, useRef } from 'react';
 
-const SUPPORTED_LANGUAGES = ['php', 'cpp', 'python', 'csharp'] as const;
+const SUPPORTED_LANGUAGES = ['php', 'cpp', 'python', 'csharp', 'htmlcss'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   php: 'PHP',
   cpp: 'C++',
   python: 'Python',
-  csharp: 'C#'
+  csharp: 'C#',
+  htmlcss: 'HTML & CSS'
 };
 
 interface Question {

@@ -16,7 +16,8 @@ const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
   cpp: 'C++',
   python: 'Python',
-  csharp: 'C#'
+  csharp: 'C#',
+  htmlcss: 'HTML & CSS'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {
@@ -41,7 +42,29 @@ class Program {
     static void Main() {
         Console.WriteLine("Hello, World!");
     }
-}`
+}`,
+  htmlcss: `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f0f0f0;
+    }
+    h1 {
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>Hello, World!</h1>
+</body>
+</html>`
 };
 
 const SYNTAX_COLORS: Record<string, Record<string, string>> = {
@@ -76,6 +99,14 @@ const SYNTAX_COLORS: Record<string, Record<string, string>> = {
     numbers: 'text-orange-400',
     types: 'text-cyan-400',
     preprocessor: 'text-pink-400'
+  },
+  htmlcss: {
+    tags: 'text-red-400',
+    attributes: 'text-orange-400',
+    strings: 'text-green-400',
+    comments: 'text-gray-500',
+    properties: 'text-cyan-400',
+    values: 'text-orange-400'
   }
 };
 
@@ -126,6 +157,18 @@ const highlightCode = (code: string, language: string): JSX.Element[] => {
         { regex: /\b(Console|String|Math|Array|List|Dictionary|Convert|DateTime|Exception|Task)\b/g, className: 'text-cyan-400' },
         { regex: /\b(WriteLine|ReadLine|Write|Parse|ToString|GetType)\b/g, className: 'text-yellow-400' },
         { regex: /\b(\d+\.?\d*)\b/g, className: 'text-orange-400' }
+      );
+    } else if (lang === 'htmlcss') {
+      patterns.push(
+        { regex: /(<!--[\s\S]*?-->|\/\*[\s\S]*?\*\/)/g, className: 'text-gray-500 italic' },
+        { regex: /(<\/?[a-zA-Z][a-zA-Z0-9]*)/g, className: 'text-red-400 font-semibold' },
+        { regex: /(\/?>)/g, className: 'text-red-400' },
+        { regex: /\b([a-zA-Z-]+)\s*(?=:)/g, className: 'text-cyan-400' },
+        { regex: /(["'])(?:(?!\1)[^\\]|\\.)*\1/g, className: 'text-green-400' },
+        { regex: /([.#][a-zA-Z_][a-zA-Z0-9_-]*)\s*(?=\{|,)/g, className: 'text-yellow-400' },
+        { regex: /\b(style|class|id|src|href|alt|type|rel|charset|name|content|lang)\b/g, className: 'text-orange-400' },
+        { regex: /(#[0-9a-fA-F]{3,8})\b/g, className: 'text-orange-400' },
+        { regex: /\b(\d+\.?\d*)(px|em|rem|%|vh|vw|s|ms)?\b/g, className: 'text-orange-400' }
       );
     }
 
@@ -244,6 +287,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [codeMessages, setCodeMessages] = useState<{ [key: string]: { text: string; type: 'success' | 'error' | 'warning' } }>({});
   const [showCancelConfirm, setShowCancelConfirm] = useState<string | null>(null);
   const [codeAbortControllers, setCodeAbortControllers] = useState<{ [key: string]: AbortController }>({});
+  const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
   const jsWorkerRef = useRef<Worker | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showCameraControls, setShowCameraControls] = useState(false);
@@ -1473,6 +1517,16 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       return;
     }
 
+    if (language === 'htmlcss') {
+      setHtmlPreviews(prev => ({ ...prev, [questionId]: true }));
+      setCodeOutputs(prev => {
+        const newOutputs = { ...prev };
+        delete newOutputs[questionId];
+        return newOutputs;
+      });
+      return;
+    }
+
     const abortController = new AbortController();
     setCodeAbortControllers(prev => ({ ...prev, [questionId]: abortController }));
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
@@ -1504,11 +1558,15 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           csharp: 'Main.cs'
         };
 
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
         try {
-          const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+          const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseKey}`
             },
             body: JSON.stringify({
               language: pistonLanguageMap[language],
@@ -1528,7 +1586,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           });
 
           if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`HTTP error! status: ${response.status}${errorText ? ' - ' + errorText : ''}`);
           }
 
           const result = await response.json();
@@ -2124,7 +2183,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                         onClick={() => runLiveCode(q.id, q.language || 'php')}
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
                       >
-                        Run Code
+                        {q.language === 'htmlcss' ? 'Preview' : 'Run Code'}
                       </button>
                     )}
                   </div>
@@ -2186,6 +2245,33 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
                       <pre className={`text-sm font-mono whitespace-pre-wrap ${codeOutputs[q.id].error ? 'text-red-300' : 'text-green-300'}`}>
                         {codeOutputs[q.id].output}
                       </pre>
+                    </div>
+                  )}
+
+                  {(q.language === 'htmlcss') && htmlPreviews[q.id] && (
+                    <div className="rounded-lg border border-gray-500 overflow-hidden">
+                      <div className="flex items-center justify-between bg-gray-700 px-4 py-2">
+                        <span className="text-sm font-bold text-gray-300">Preview HTML & CSS</span>
+                        <button
+                          onClick={() => setHtmlPreviews(prev => {
+                            const newPreviews = { ...prev };
+                            delete newPreviews[q.id];
+                            return newPreviews;
+                          })}
+                          className="text-gray-400 hover:text-white text-sm"
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                      <div className="bg-white">
+                        <iframe
+                          srcDoc={liveCodeDrafts[q.id] || answers[q.id] || ''}
+                          title={`HTML Preview ${q.id}`}
+                          sandbox="allow-scripts"
+                          className="w-full border-0"
+                          style={{ minHeight: '300px', height: '400px' }}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>

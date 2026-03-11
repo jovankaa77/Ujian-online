@@ -6,7 +6,8 @@ const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
   cpp: 'C++',
   python: 'Python',
-  csharp: 'C#'
+  csharp: 'C#',
+  htmlcss: 'HTML & CSS'
 };
 
 interface Question {
@@ -44,6 +45,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [isSaving, setIsSaving] = useState(false);
   const [codeOutputs, setCodeOutputs] = useState<{ [key: string]: { output: string; error: boolean } }>({});
   const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
+  const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
   const abortControllersRef = useRef<{ [key: string]: AbortController }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
@@ -75,6 +77,16 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
       setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: Kode kosong!', error: true } }));
+      return;
+    }
+
+    if (language === 'htmlcss') {
+      setHtmlPreviews(prev => ({ ...prev, [questionId]: true }));
+      setCodeOutputs(prev => {
+        const newOutputs = { ...prev };
+        delete newOutputs[questionId];
+        return newOutputs;
+      });
       return;
     }
 
@@ -110,11 +122,15 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
           csharp: 'Main.cs'
         };
 
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
         try {
-          const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+          const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseKey}`
             },
             body: JSON.stringify({
               language: pistonLanguageMap[language],
@@ -134,7 +150,8 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
           });
 
           if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`HTTP error! status: ${response.status}${errorText ? ' - ' + errorText : ''}`);
           }
 
           const result = await response.json();
@@ -330,7 +347,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                             onClick={() => runStudentCode(q.id, q.language || 'php')}
                             className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
                           >
-                            Run Code
+                            {q.language === 'htmlcss' ? 'Preview' : 'Run Code'}
                           </button>
                         )}
                       </div>
@@ -353,6 +370,33 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                           <pre className={`text-sm font-mono whitespace-pre-wrap ${codeOutputs[q.id].error ? 'text-red-300' : 'text-green-300'}`}>
                             {codeOutputs[q.id].output}
                           </pre>
+                        </div>
+                      )}
+
+                      {(q.language === 'htmlcss') && htmlPreviews[q.id] && (
+                        <div className="mt-3 rounded-lg border border-gray-500 overflow-hidden">
+                          <div className="flex items-center justify-between bg-gray-700 px-4 py-2">
+                            <span className="text-sm font-bold text-gray-300">Preview HTML & CSS</span>
+                            <button
+                              onClick={() => setHtmlPreviews(prev => {
+                                const newPreviews = { ...prev };
+                                delete newPreviews[q.id];
+                                return newPreviews;
+                              })}
+                              className="text-gray-400 hover:text-white text-sm"
+                            >
+                              Tutup
+                            </button>
+                          </div>
+                          <div className="bg-white">
+                            <iframe
+                              srcDoc={session.answers[q.id] || ''}
+                              title={`HTML Preview ${q.id}`}
+                              sandbox="allow-scripts"
+                              className="w-full border-0"
+                              style={{ minHeight: '300px', height: '400px' }}
+                            />
+                          </div>
                         </div>
                       )}
                     </div>
