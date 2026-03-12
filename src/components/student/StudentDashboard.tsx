@@ -26,6 +26,7 @@ interface ExamResult {
   finishTime: Date;
   status: string;
   scoreReduction?: number;
+  hasMC: boolean;
 }
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, navigateBack }) => {
@@ -172,7 +173,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                   totalScore,
                   finishTime: sessionData.finishTime?.toDate() || new Date(),
                   status: sessionData.status,
-                  scoreReduction: reduction
+                  scoreReduction: reduction,
+                  hasMC
                 });
               }
             });
@@ -989,17 +991,21 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                     <td className="p-4 font-semibold">{result.examName}</td>
                     <td className="p-4 text-gray-400 font-mono">{result.examCode || 'N/A'}</td>
                     <td className="p-4">
-                      <span className={`font-bold ${
-                        result.status === 'disqualified'
-                          ? 'text-red-400'
-                          : result.finalScore >= 70
-                          ? 'text-green-400'
-                          : result.finalScore >= 60
-                          ? 'text-yellow-400'
-                          : 'text-red-400'
-                      }`}>
-                        {result.finalScore.toFixed(2)}
-                      </span>
+                      {result.hasMC ? (
+                        <span className={`font-bold ${
+                          result.status === 'disqualified'
+                            ? 'text-red-400'
+                            : result.finalScore >= 70
+                            ? 'text-green-400'
+                            : result.finalScore >= 60
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                        }`}>
+                          {result.finalScore.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
                     </td>
                     <td className="p-4">
                       <span className="text-gray-300">
