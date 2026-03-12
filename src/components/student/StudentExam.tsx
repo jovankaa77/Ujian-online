@@ -1436,7 +1436,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         isOpen={showUnansweredModal} 
         title="Ada Soal yang Belum Dijawab" 
         onCancel={() => setShowUnansweredModal(false)} 
-        onConfirm={() => setShowConfirmModal(true)} 
+        onConfirm={() => { setShowUnansweredModal(false); setShowConfirmModal(true); }}
         confirmText="Tetap Selesaikan" 
         confirmColor="red"
         cancelText="Kembali Mengerjakan"

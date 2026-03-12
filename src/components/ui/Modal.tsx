@@ -29,8 +29,8 @@ const Modal: React.FC<ModalProps> = ({
   };
   
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50">
-      <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center" style={{ zIndex: 9999 }}>
+      <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4 relative" style={{ zIndex: 10000 }}>
         <h3 className="text-xl font-bold mb-4">{title}</h3>
         <div className="text-gray-300 mb-6">{children}</div>
         <div className="flex justify-end space-x-4">
