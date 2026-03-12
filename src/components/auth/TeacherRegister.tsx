@@ -43,11 +43,19 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
       // Generate unique ID for teacher
       const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      await setDoc(doc(db, `artifacts/${appId}/public/data/teachers`, teacherId), {
+      const teacherData = {
         username: formData.username,
-        password: formData.password, // In production, hash this password
+        password: formData.password,
         createdAt: new Date(),
         role: 'teacher'
+      };
+
+      await setDoc(doc(db, `artifacts/${appId}/public/data/teachers`, teacherId), teacherData);
+
+      await setDoc(doc(db, `artifacts/${appId}/public/data/users`, teacherId), {
+        ...teacherData,
+        password: '***',
+        userId: teacherId,
       });
 
       alert('Akun dosen berhasil dibuat! Silakan login.');

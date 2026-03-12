@@ -102,17 +102,25 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
       // Generate unique ID for student
       const studentId = `student_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      await setDoc(doc(db, `artifacts/${appId}/public/data/students`, studentId), {
+      const studentData = {
         fullName: formData.fullName,
         nim: formData.nim,
         username: formData.username,
-        password: formData.password, // In production, hash this password
+        password: formData.password,
         major: formData.major,
         className: formData.className,
         university: formData.university,
         whatsapp: formData.whatsapp,
         createdAt: new Date(),
         role: 'student'
+      };
+
+      await setDoc(doc(db, `artifacts/${appId}/public/data/students`, studentId), studentData);
+
+      await setDoc(doc(db, `artifacts/${appId}/public/data/users`, studentId), {
+        ...studentData,
+        password: '***',
+        userId: studentId,
       });
 
       alert('Akun siswa berhasil dibuat! Silakan login.');

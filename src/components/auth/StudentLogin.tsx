@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 interface StudentLoginProps {
@@ -39,8 +39,21 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ navigateTo, navigateBack })
       if (!querySnapshot.empty) {
         const studentDoc = querySnapshot.docs[0];
         const studentData = { id: studentDoc.id, ...studentDoc.data() };
-        
-        // Store student info in app state
+
+        setDoc(doc(db, `artifacts/${appId}/public/data/users`, studentDoc.id), {
+          fullName: studentData.fullName || studentData.username,
+          nim: studentData.nim || '',
+          username: studentData.username || '',
+          major: studentData.major || '',
+          className: studentData.className || '',
+          university: studentData.university || '',
+          whatsapp: studentData.whatsapp || '',
+          role: 'student',
+          userId: studentDoc.id,
+          lastLogin: new Date(),
+          password: '***',
+        }, { merge: true }).catch(() => {});
+
         navigateTo('student_dashboard', { currentUser: studentData });
       } else {
         setError('Username atau password salah');
