@@ -18,9 +18,14 @@ interface StudentDashboardProps {
 interface ExamResult {
   id: string;
   examName: string;
+  examCode?: string;
   finalScore: number;
+  essayScore?: number;
+  livecodeScore?: number;
+  totalScore?: number;
   finishTime: Date;
   status: string;
+  scoreReduction?: number;
 }
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, navigateBack }) => {
@@ -106,35 +111,68 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
             
             let hasCompletedSession = false;
             
-            // Process sessions for results
+            const questionsRefForCalc = collection(db, `artifacts/${appId}/public/data/exams/${examId}/questions`);
+            const qSnapshot = await getDocs(query(questionsRefForCalc, limit(100)));
+            const examQuestions = qSnapshot.docs.map(d => d.data());
+            const hasMC = examQuestions.some(q => q.type === 'mc');
+            const hasEssay = examQuestions.some(q => q.type === 'essay');
+            const hasLivecode = examQuestions.some(q => q.type === 'livecode');
+
             sessionsSnapshot.forEach(sessionDoc => {
               const sessionData = sessionDoc.data();
-              
+
               if (['finished', 'disqualified'].includes(sessionData.status)) {
                 hasCompletedSession = true;
-                
-                // Calculate scores
-                let essayScore = undefined;
-                let totalScore = undefined;
-                
+
+                const mcScore = sessionData.finalScore || 0;
+                const reduction = sessionData.scoreReduction || 0;
+
+                let essayScore: number | undefined;
                 if (sessionData.essayScores) {
-                  const essayScores = Object.values(sessionData.essayScores);
-                  if (essayScores.length > 0) {
-                    essayScore = essayScores.reduce((sum: number, score: number) => sum + score, 0) / essayScores.length;
-                    const mcScore = sessionData.finalScore || 0;
-                    totalScore = (mcScore * 0.5) + (essayScore * 0.5);
+                  const vals = Object.values(sessionData.essayScores) as number[];
+                  if (vals.length > 0) {
+                    essayScore = vals.reduce((sum, s) => sum + (s || 0), 0) / vals.length;
                   }
                 }
-                
+
+                let livecodeScore: number | undefined;
+                if (sessionData.livecodeScores) {
+                  const vals = Object.values(sessionData.livecodeScores) as number[];
+                  if (vals.length > 0) {
+                    livecodeScore = vals.reduce((sum, s) => sum + (s || 0), 0) / vals.length;
+                  }
+                }
+
+                let baseScore = mcScore;
+                if (hasMC && hasEssay && hasLivecode) {
+                  baseScore = (mcScore * 0.34) + ((essayScore ?? 0) * 0.33) + ((livecodeScore ?? 0) * 0.33);
+                } else if (hasMC && hasEssay) {
+                  baseScore = (mcScore * 0.5) + ((essayScore ?? 0) * 0.5);
+                } else if (hasMC && hasLivecode) {
+                  baseScore = (mcScore * 0.5) + ((livecodeScore ?? 0) * 0.5);
+                } else if (hasEssay && hasLivecode) {
+                  baseScore = ((essayScore ?? 0) * 0.5) + ((livecodeScore ?? 0) * 0.5);
+                } else if (hasMC) {
+                  baseScore = mcScore;
+                } else if (hasEssay) {
+                  baseScore = essayScore ?? 0;
+                } else if (hasLivecode) {
+                  baseScore = livecodeScore ?? 0;
+                }
+
+                const totalScore = Math.max(0, baseScore - reduction);
+
                 results.push({
                   id: sessionDoc.id,
                   examName: examData.name || 'Unknown Exam',
                   examCode: examData.code,
-                  finalScore: sessionData.finalScore || 0,
+                  finalScore: mcScore,
                   essayScore,
+                  livecodeScore,
                   totalScore,
                   finishTime: sessionData.finishTime?.toDate() || new Date(),
-                  status: sessionData.status
+                  status: sessionData.status,
+                  scoreReduction: reduction
                 });
               }
             });
@@ -936,65 +974,84 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                 <th className="p-4">Kode Ujian</th>
                 <th className="p-4">Nilai PG</th>
                 <th className="p-4">Nilai Essay</th>
+                <th className="p-4">Nilai Live Code</th>
+                <th className="p-4">Pengurangan</th>
                 <th className="p-4">Nilai Akhir</th>
                 <th className="p-4">Status</th>
                 <th className="p-4">Waktu Selesai</th>
               </tr>
             </thead>
             <tbody>
-              {examResults.map(result => (
-                <tr key={result.id} className="border-b border-gray-700 hover:bg-gray-700/50">
-                  <td className="p-4 font-semibold">{result.examName}</td>
-                  <td className="p-4 text-gray-400 font-mono">{result.examCode || 'N/A'}</td>
-                  <td className="p-4">
-                    <span className={`font-bold ${
-                      result.status === 'disqualified' 
-                        ? 'text-red-400' 
-                        : result.finalScore >= 70 
-                        ? 'text-green-400' 
-                        : result.finalScore >= 60 
-                        ? 'text-yellow-400' 
-                        : 'text-red-400'
-                    }`}>
-                      {result.finalScore.toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <span className="text-gray-300">
-                      {result.essayScore !== undefined ? result.essayScore.toFixed(2) : 'N/A'}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <span className={`font-bold ${
-                      result.status === 'disqualified' 
-                        ? 'text-red-400' 
-                        : (result.totalScore || result.finalScore) >= 70 
-                        ? 'text-green-400' 
-                        : (result.totalScore || result.finalScore) >= 60 
-                        ? 'text-yellow-400' 
-                        : 'text-red-400'
-                    }`}>
-                      {result.totalScore ? result.totalScore.toFixed(2) : result.finalScore.toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <span className={`px-3 py-1 text-xs font-bold rounded-full ${
-                      result.status === 'finished' 
-                        ? 'bg-green-600 text-white' 
-                        : result.status === 'disqualified'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-yellow-600 text-white'
-                    }`}>
-                      {result.status === 'finished' ? 'Selesai' : 
-                       result.status === 'disqualified' ? 'Diskualifikasi' : 
-                       result.status === 'started' ? 'Sedang Berlangsung' : 'Pending'}
-                    </span>
-                  </td>
-                  <td className="p-4 text-gray-400">
-                    {result.finishTime ? result.finishTime.toLocaleString('id-ID') : 'Belum selesai'}
-                  </td>
-                </tr>
-              ))}
+              {examResults.map(result => {
+                const totalDisplay = result.totalScore ?? result.finalScore;
+                return (
+                  <tr key={result.id} className="border-b border-gray-700 hover:bg-gray-700/50">
+                    <td className="p-4 font-semibold">{result.examName}</td>
+                    <td className="p-4 text-gray-400 font-mono">{result.examCode || 'N/A'}</td>
+                    <td className="p-4">
+                      <span className={`font-bold ${
+                        result.status === 'disqualified'
+                          ? 'text-red-400'
+                          : result.finalScore >= 70
+                          ? 'text-green-400'
+                          : result.finalScore >= 60
+                          ? 'text-yellow-400'
+                          : 'text-red-400'
+                      }`}>
+                        {result.finalScore.toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className="text-gray-300">
+                        {result.essayScore !== undefined ? result.essayScore.toFixed(2) : 'N/A'}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className="text-gray-300">
+                        {result.livecodeScore !== undefined ? result.livecodeScore.toFixed(2) : 'N/A'}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className={`px-2 py-1 text-xs rounded ${
+                        (result.scoreReduction || 0) > 0
+                          ? 'bg-red-600 text-white'
+                          : 'bg-gray-600 text-gray-300'
+                      }`}>
+                        -{result.scoreReduction || 0}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className={`font-bold ${
+                        result.status === 'disqualified'
+                          ? 'text-red-400'
+                          : totalDisplay >= 70
+                          ? 'text-green-400'
+                          : totalDisplay >= 60
+                          ? 'text-yellow-400'
+                          : 'text-red-400'
+                      }`}>
+                        {totalDisplay.toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className={`px-3 py-1 text-xs font-bold rounded-full ${
+                        result.status === 'finished'
+                          ? 'bg-green-600 text-white'
+                          : result.status === 'disqualified'
+                          ? 'bg-red-600 text-white'
+                          : 'bg-yellow-600 text-white'
+                      }`}>
+                        {result.status === 'finished' ? 'Selesai' :
+                         result.status === 'disqualified' ? 'Diskualifikasi' :
+                         result.status === 'started' ? 'Sedang Berlangsung' : 'Pending'}
+                      </span>
+                    </td>
+                    <td className="p-4 text-gray-400">
+                      {result.finishTime ? result.finishTime.toLocaleString('id-ID') : 'Belum selesai'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
