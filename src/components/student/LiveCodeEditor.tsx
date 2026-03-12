@@ -41,15 +41,7 @@ body {
   line-height: 1.6;
   background-color: #f4f4f4;
   color: #333;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
   min-height: 100vh;
-}
-
-h1 {
-  text-align: center;
 }
 
 @media (max-width: 768px) {
