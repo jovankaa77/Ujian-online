@@ -52,12 +52,6 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
 
       await setDoc(doc(db, `artifacts/${appId}/public/data/teachers`, teacherId), teacherData);
 
-      await setDoc(doc(db, `artifacts/${appId}/public/data/users`, teacherId), {
-        ...teacherData,
-        password: '***',
-        userId: teacherId,
-      });
-
       alert('Akun dosen berhasil dibuat! Silakan login.');
       navigateTo('teacher_login');
     } catch (error: any) {

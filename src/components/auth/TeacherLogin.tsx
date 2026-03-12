@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 interface TeacherLoginProps {
@@ -39,14 +39,6 @@ const TeacherLogin: React.FC<TeacherLoginProps> = ({ navigateTo, navigateBack })
       if (!querySnapshot.empty) {
         const teacherDoc = querySnapshot.docs[0];
         const teacherData = { id: teacherDoc.id, ...teacherDoc.data() };
-
-        setDoc(doc(db, `artifacts/${appId}/public/data/users`, teacherDoc.id), {
-          username: teacherData.username || '',
-          role: 'teacher',
-          userId: teacherDoc.id,
-          lastLogin: new Date(),
-          password: '***',
-        }, { merge: true }).catch(() => {});
 
         navigateTo('teacher_dashboard', { currentUser: teacherData });
       } else {
