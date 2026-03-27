@@ -140,7 +140,7 @@ function createJSWorkerCode(): string {
           logs.push(args.map(function(a) {
             if (typeof a === 'object') {
               try { return JSON.stringify(a, null, 2); }
-              catch(e) { return String(a); }
+              catch(err) { return String(a); }
             }
             return String(a);
           }).join(' '));
@@ -192,15 +192,14 @@ function createJSWorkerCode(): string {
         },
         fetch: function() { logs.push(blockedMsg + ' (fetch)'); return Promise.reject(new Error('fetch diblokir')); },
         XMLHttpRequest: function() { logs.push(blockedMsg + ' (XMLHttpRequest)'); },
-        eval: function() { logs.push(blockedMsg + ' (eval)'); },
-        Function: function() { logs.push(blockedMsg + ' (Function constructor)'); }
+        safeEval: function() { logs.push(blockedMsg + ' (eval)'); },
+        SafeFunction: function() { logs.push(blockedMsg + ' (Function constructor)'); }
       };
 
       try {
-        const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage, eval, Function) {' +
-          '"use strict";' +
+        const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage) {' +
           code +
-          '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage, fakeWindow.eval, fakeWindow.Function);';
+          '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage);';
 
         const fn = new Function('fakeConsole', 'fakeWindow', wrappedCode);
         fn(fakeConsole, fakeWindow);

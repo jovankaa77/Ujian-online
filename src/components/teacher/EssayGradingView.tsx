@@ -137,7 +137,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
               logs.push(args.map(function(a) {
                 if (typeof a === 'object') {
                   try { return JSON.stringify(a, null, 2); }
-                  catch(e) { return String(a); }
+                  catch(err) { return String(a); }
                 }
                 return String(a);
               }).join(' '));
@@ -170,15 +170,14 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
             sessionStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
             fetch: function() { return Promise.reject(new Error('fetch diblokir')); },
             XMLHttpRequest: function() {},
-            eval: function() {},
-            Function: function() {}
+            safeEval: function() {},
+            SafeFunction: function() {}
           };
 
           try {
-            const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage, eval, Function) {' +
-              '"use strict";' +
+            const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage) {' +
               code +
-              '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage, fakeWindow.eval, fakeWindow.Function);';
+              '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage);';
 
             const fn = new Function('fakeConsole', 'fakeWindow', wrappedCode);
             fn(fakeConsole, fakeWindow);
