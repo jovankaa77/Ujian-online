@@ -3,17 +3,15 @@ import Editor, { OnMount } from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
-  cpp: 'C++',
   python: 'Python',
-  csharp: 'C#',
+  javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {
   php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`,
-  cpp: `// C++ Hello World\n#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`,
   python: `# Python Hello World\nprint("Hello, World!")`,
-  csharp: `// C# Hello World\nusing System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine("Hello, World!");\n    }\n}`
+  javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`
 };
 
 const WEB_DEFAULT_HTML = `<!DOCTYPE html>
@@ -52,24 +50,19 @@ const WEB_DEFAULT_JS = `// JavaScript\nconsole.log("Hello from script.js");`;
 
 const MONACO_LANGUAGE_MAP: Record<string, string> = {
   php: 'php',
-  cpp: 'cpp',
   python: 'python',
-  csharp: 'csharp',
+  javascript: 'javascript',
   htmlcss: 'html'
 };
 
 const PISTON_LANGUAGE_MAP: Record<string, string> = {
   python: 'python',
-  php: 'php',
-  cpp: 'c++',
-  csharp: 'csharp'
+  php: 'php'
 };
 
 const PISTON_VERSION_MAP: Record<string, string> = {
   python: '3.10.0',
-  php: '8.2.3',
-  cpp: '10.2.0',
-  csharp: '6.12.0'
+  php: '8.2.3'
 };
 
 const WEB_SEPARATOR = '\n<!--__WEB_TAB_SEPARATOR__-->\n';
@@ -134,30 +127,163 @@ function extractBody(html: string): string {
   return html;
 }
 
-function buildSecureSingleHtml(studentCode: string): string {
-  const securityScript = `<script>
-window.alert = function(msg) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Alert diblokir: ' + msg}, '*'); };
-window.confirm = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Confirm diblokir'}, '*'); return false; };
-window.prompt = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Prompt diblokir'}, '*'); return null; };
-window.open = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Membuka tab baru diblokir demi keamanan!'}, '*'); return null; };
-window.print = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Fitur Print diblokir!'}, '*'); };
-var logCount = 0;
-var origLog = console.log;
-console.log = function() {
-  if (logCount < 50) { logCount++; origLog.apply(console, arguments); }
-};
-</script>
-<style>body { font-family: sans-serif; word-wrap: break-word; }</style>`;
+function createJSWorkerCode(): string {
+  return `
+    self.onmessage = function(e) {
+      const code = e.data.code;
+      const logs = [];
+      const errors = [];
 
-  const hasHtmlStructure = /<html/i.test(studentCode);
-  if (hasHtmlStructure) {
-    const hasHead = /<head([^>]*)>/i.test(studentCode);
-    if (hasHead) {
-      return studentCode.replace(/<head([^>]*)>/i, `<head$1>${securityScript}`);
-    }
-    return studentCode.replace(/<html([^>]*)>/i, `<html$1><head>${securityScript}</head>`);
+      const fakeConsole = {
+        log: function() {
+          const args = Array.prototype.slice.call(arguments);
+          logs.push(args.map(function(a) {
+            if (typeof a === 'object') {
+              try { return JSON.stringify(a, null, 2); }
+              catch(e) { return String(a); }
+            }
+            return String(a);
+          }).join(' '));
+        },
+        error: function() {
+          const args = Array.prototype.slice.call(arguments);
+          errors.push(args.map(String).join(' '));
+        },
+        warn: function() {
+          const args = Array.prototype.slice.call(arguments);
+          logs.push('[WARN] ' + args.map(String).join(' '));
+        },
+        info: function() {
+          const args = Array.prototype.slice.call(arguments);
+          logs.push('[INFO] ' + args.map(String).join(' '));
+        }
+      };
+
+      const blockedMsg = '[DIBLOKIR] Fungsi ini diblokir untuk keamanan ujian.';
+      const fakeWindow = {
+        alert: function() { logs.push(blockedMsg + ' (alert)'); },
+        confirm: function() { logs.push(blockedMsg + ' (confirm)'); return false; },
+        prompt: function() { logs.push(blockedMsg + ' (prompt)'); return null; },
+        open: function() { logs.push(blockedMsg + ' (window.open)'); return null; },
+        close: function() { logs.push(blockedMsg + ' (window.close)'); },
+        print: function() { logs.push(blockedMsg + ' (print)'); },
+        location: {
+          href: '',
+          assign: function() { logs.push(blockedMsg + ' (location.assign)'); },
+          replace: function() { logs.push(blockedMsg + ' (location.replace)'); },
+          reload: function() { logs.push(blockedMsg + ' (location.reload)'); }
+        },
+        document: {
+          write: function() { logs.push(blockedMsg + ' (document.write)'); },
+          writeln: function() { logs.push(blockedMsg + ' (document.writeln)'); },
+          cookie: ''
+        },
+        localStorage: {
+          getItem: function() { return null; },
+          setItem: function() { logs.push(blockedMsg + ' (localStorage)'); },
+          removeItem: function() {},
+          clear: function() {}
+        },
+        sessionStorage: {
+          getItem: function() { return null; },
+          setItem: function() { logs.push(blockedMsg + ' (sessionStorage)'); },
+          removeItem: function() {},
+          clear: function() {}
+        },
+        fetch: function() { logs.push(blockedMsg + ' (fetch)'); return Promise.reject(new Error('fetch diblokir')); },
+        XMLHttpRequest: function() { logs.push(blockedMsg + ' (XMLHttpRequest)'); },
+        eval: function() { logs.push(blockedMsg + ' (eval)'); },
+        Function: function() { logs.push(blockedMsg + ' (Function constructor)'); }
+      };
+
+      try {
+        const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage, eval, Function) {' +
+          '"use strict";' +
+          code +
+          '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage, fakeWindow.eval, fakeWindow.Function);';
+
+        const fn = new Function('fakeConsole', 'fakeWindow', wrappedCode);
+        fn(fakeConsole, fakeWindow);
+
+        self.postMessage({
+          success: true,
+          output: logs.join('\\n'),
+          errors: errors.join('\\n')
+        });
+      } catch(err) {
+        self.postMessage({
+          success: false,
+          output: logs.join('\\n'),
+          errors: err.toString()
+        });
+      }
+    };
+  `;
+}
+
+function executeJavaScriptInWorker(code: string, timeout: number = 3000): Promise<{ output: string; error: boolean }> {
+  return new Promise((resolve) => {
+    const blob = new Blob([createJSWorkerCode()], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(blob);
+    const worker = new Worker(workerUrl);
+
+    const timeoutId = setTimeout(() => {
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      resolve({
+        output: 'Error: Waktu eksekusi habis (Timeout 3 detik).\nKemungkinan kode Anda memiliki perulangan tanpa henti (Infinite Loop).\nHarap periksa kembali logika loop Anda.',
+        error: true
+      });
+    }, timeout);
+
+    worker.onmessage = (e) => {
+      clearTimeout(timeoutId);
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+
+      const { success, output, errors } = e.data;
+      if (success) {
+        if (errors) {
+          resolve({ output: output + (output ? '\n' : '') + 'Errors:\n' + errors, error: true });
+        } else {
+          resolve({ output: output || '(Eksekusi berhasil tanpa output)', error: false });
+        }
+      } else {
+        resolve({ output: (output ? output + '\n' : '') + 'Error: ' + errors, error: true });
+      }
+    };
+
+    worker.onerror = (e) => {
+      clearTimeout(timeoutId);
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      resolve({ output: 'Worker Error: ' + e.message, error: true });
+    };
+
+    worker.postMessage({ code });
+  });
+}
+
+function getErrorMessageFromStatus(status: number, defaultMsg: string): string {
+  switch (status) {
+    case 429:
+      return 'Error: Terlalu banyak request. Harap tunggu beberapa detik sebelum menjalankan kode lagi.';
+    case 408:
+    case 504:
+      return 'Error: Waktu eksekusi habis (Timeout). Periksa apakah kode Anda memiliki perulangan tanpa henti (Infinite Loop).';
+    case 500:
+      return 'Error: Server eksekusi sedang bermasalah. Hubungi pengawas.';
+    case 502:
+    case 503:
+      return 'Error: Server eksekusi tidak tersedia sementara. Coba lagi dalam beberapa saat.';
+    case 400:
+      return 'Error: Request tidak valid. Periksa kode Anda.';
+    case 401:
+    case 403:
+      return 'Error: Akses ditolak ke server eksekusi.';
+    default:
+      return defaultMsg || `Error: Server mengembalikan status ${status}`;
   }
-  return `<html><head>${securityScript}</head><body>${studentCode}</body></html>`;
 }
 
 interface LiveCodeEditorProps {
@@ -195,6 +321,7 @@ export default function LiveCodeEditor({
   const [toastMsg, setToastMsg] = useState('');
 
   const isWebMode = language === 'htmlcss';
+  const isJavaScript = language === 'javascript';
 
   const [webActiveTab, setWebActiveTab] = useState<WebTab>('html');
   const [webHtml, setWebHtml] = useState(WEB_DEFAULT_HTML);
@@ -279,7 +406,7 @@ export default function LiveCodeEditor({
   const stopRunning = useCallback(() => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     setIsRunning(false);
-    setCodeOutput({ output: 'Execution stopped by user.', error: true });
+    setCodeOutput({ output: 'Eksekusi dihentikan oleh pengguna.', error: true });
     abortControllerRef.current = null;
   }, []);
 
@@ -296,17 +423,25 @@ export default function LiveCodeEditor({
       return;
     }
 
+    setIsRunning(true);
+    setCodeOutput({ output: 'Menjalankan kode...', error: false });
+
+    if (isJavaScript) {
+      const result = await executeJavaScriptInWorker(code, 3000);
+      setCodeOutput(result);
+      setIsRunning(false);
+      return;
+    }
+
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    setIsRunning(true);
-    setCodeOutput({ output: 'Running...', error: false });
 
     try {
       const mappedLanguage = PISTON_LANGUAGE_MAP[language];
       const mappedVersion = PISTON_VERSION_MAP[language];
 
       if (!mappedLanguage || !mappedVersion) {
-        setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
+        setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung untuk eksekusi server.', error: true });
         setIsRunning(false);
         return;
       }
@@ -328,7 +463,11 @@ export default function LiveCodeEditor({
         signal: abortController.signal
       });
 
-      if (!response.ok) throw new Error('Koneksi ke server eksekusi gagal.');
+      if (!response.ok) {
+        const errorMsg = getErrorMessageFromStatus(response.status, '');
+        setCodeOutput({ output: errorMsg, error: true });
+        return;
+      }
 
       const data = await response.json();
 
@@ -358,10 +497,15 @@ export default function LiveCodeEditor({
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        setCodeOutput({ output: 'Execution stopped by user.', error: true });
+        setCodeOutput({ output: 'Eksekusi dihentikan oleh pengguna.', error: true });
+      } else if (err.name === 'TypeError') {
+        setCodeOutput({
+          output: 'Error: Jaringan koneksi tidak stabil atau tidak terhubung ke internet.\nPastikan koneksi internet Anda aktif dan coba lagi.',
+          error: true
+        });
       } else {
         setCodeOutput({
-          output: 'Error: ' + (err.message || 'Terjadi kesalahan.') + '\n\nPastikan koneksi internet Anda stabil.',
+          output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'),
           error: true
         });
       }
@@ -369,7 +513,7 @@ export default function LiveCodeEditor({
       setIsRunning(false);
       abortControllerRef.current = null;
     }
-  }, [isWebMode, currentDraft, savedAnswer, language]);
+  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
   const showPreviewPanel = isWebMode && htmlPreview;
@@ -432,6 +576,11 @@ export default function LiveCodeEditor({
           <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded font-medium">
             {LANGUAGE_LABELS[language] || language}
           </span>
+          {isJavaScript && (
+            <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded">
+              Client-side
+            </span>
+          )}
           <button
             onClick={() => {
               if (isWebMode) {

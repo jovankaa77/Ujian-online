@@ -7,9 +7,8 @@ import EssayGradingView from './EssayGradingView';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
-  cpp: 'C++',
   python: 'Python',
-  csharp: 'C#',
+  javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
 

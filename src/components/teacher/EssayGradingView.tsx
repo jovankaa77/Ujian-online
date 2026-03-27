@@ -5,9 +5,8 @@ import Editor from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   php: 'PHP',
-  cpp: 'C++',
   python: 'Python',
-  csharp: 'C#',
+  javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
 
@@ -124,6 +123,139 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     delete abortControllersRef.current[questionId];
   };
 
+  const executeJavaScriptInWorker = (code: string, timeout: number = 3000): Promise<{ output: string; error: boolean }> => {
+    return new Promise((resolve) => {
+      const workerCode = `
+        self.onmessage = function(e) {
+          const code = e.data.code;
+          const logs = [];
+          const errors = [];
+
+          const fakeConsole = {
+            log: function() {
+              const args = Array.prototype.slice.call(arguments);
+              logs.push(args.map(function(a) {
+                if (typeof a === 'object') {
+                  try { return JSON.stringify(a, null, 2); }
+                  catch(e) { return String(a); }
+                }
+                return String(a);
+              }).join(' '));
+            },
+            error: function() {
+              const args = Array.prototype.slice.call(arguments);
+              errors.push(args.map(String).join(' '));
+            },
+            warn: function() {
+              const args = Array.prototype.slice.call(arguments);
+              logs.push('[WARN] ' + args.map(String).join(' '));
+            },
+            info: function() {
+              const args = Array.prototype.slice.call(arguments);
+              logs.push('[INFO] ' + args.map(String).join(' '));
+            }
+          };
+
+          const blockedMsg = '[DIBLOKIR] Fungsi ini diblokir untuk keamanan.';
+          const fakeWindow = {
+            alert: function() { logs.push(blockedMsg + ' (alert)'); },
+            confirm: function() { logs.push(blockedMsg + ' (confirm)'); return false; },
+            prompt: function() { logs.push(blockedMsg + ' (prompt)'); return null; },
+            open: function() { logs.push(blockedMsg + ' (window.open)'); return null; },
+            close: function() { logs.push(blockedMsg + ' (window.close)'); },
+            print: function() { logs.push(blockedMsg + ' (print)'); },
+            location: { href: '', assign: function() {}, replace: function() {}, reload: function() {} },
+            document: { write: function() {}, writeln: function() {}, cookie: '' },
+            localStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
+            sessionStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
+            fetch: function() { return Promise.reject(new Error('fetch diblokir')); },
+            XMLHttpRequest: function() {},
+            eval: function() {},
+            Function: function() {}
+          };
+
+          try {
+            const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage, eval, Function) {' +
+              '"use strict";' +
+              code +
+              '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage, fakeWindow.eval, fakeWindow.Function);';
+
+            const fn = new Function('fakeConsole', 'fakeWindow', wrappedCode);
+            fn(fakeConsole, fakeWindow);
+
+            self.postMessage({
+              success: true,
+              output: logs.join('\\n'),
+              errors: errors.join('\\n')
+            });
+          } catch(err) {
+            self.postMessage({
+              success: false,
+              output: logs.join('\\n'),
+              errors: err.toString()
+            });
+          }
+        };
+      `;
+
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(blob);
+      const worker = new Worker(workerUrl);
+
+      const timeoutId = setTimeout(() => {
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        resolve({
+          output: 'Error: Waktu eksekusi habis (Timeout 3 detik).\nKemungkinan kode memiliki perulangan tanpa henti (Infinite Loop).',
+          error: true
+        });
+      }, timeout);
+
+      worker.onmessage = (e) => {
+        clearTimeout(timeoutId);
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+
+        const { success, output, errors } = e.data;
+        if (success) {
+          if (errors) {
+            resolve({ output: output + (output ? '\n' : '') + 'Errors:\n' + errors, error: true });
+          } else {
+            resolve({ output: output || '(Eksekusi berhasil tanpa output)', error: false });
+          }
+        } else {
+          resolve({ output: (output ? output + '\n' : '') + 'Error: ' + errors, error: true });
+        }
+      };
+
+      worker.onerror = (e) => {
+        clearTimeout(timeoutId);
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        resolve({ output: 'Worker Error: ' + e.message, error: true });
+      };
+
+      worker.postMessage({ code });
+    });
+  };
+
+  const getErrorMessageFromStatus = (status: number): string => {
+    switch (status) {
+      case 429:
+        return 'Error: Terlalu banyak request. Harap tunggu beberapa detik sebelum menjalankan kode lagi.';
+      case 408:
+      case 504:
+        return 'Error: Waktu eksekusi habis (Timeout). Periksa apakah kode memiliki perulangan tanpa henti (Infinite Loop).';
+      case 500:
+        return 'Error: Server eksekusi sedang bermasalah. Hubungi pengawas.';
+      case 502:
+      case 503:
+        return 'Error: Server eksekusi tidak tersedia sementara. Coba lagi dalam beberapa saat.';
+      default:
+        return `Error: Server mengembalikan status ${status}`;
+    }
+  };
+
   const runStudentCode = async (questionId: string, language: string) => {
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
@@ -141,36 +273,37 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       return;
     }
 
+    setRunningCode(prev => ({ ...prev, [questionId]: true }));
+    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Menjalankan kode...', error: false } }));
+
+    if (language === 'javascript') {
+      const result = await executeJavaScriptInWorker(code, 3000);
+      setCodeOutputs(prev => ({ ...prev, [questionId]: result }));
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
+      return;
+    }
+
     const abortController = new AbortController();
     abortControllersRef.current[questionId] = abortController;
-
-    setRunningCode(prev => ({ ...prev, [questionId]: true }));
-    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Compiling and running...', error: false } }));
 
     try {
       let output = '';
       let hasError = false;
 
-      if (language === 'python' || language === 'php' || language === 'cpp' || language === 'csharp') {
+      if (language === 'python' || language === 'php') {
         const pistonLanguageMap: Record<string, string> = {
           python: 'python',
-          php: 'php',
-          cpp: 'cpp',
-          csharp: 'csharp'
+          php: 'php'
         };
 
         const pistonVersionMap: Record<string, string> = {
           python: '3.10.0',
-          php: '8.2.3',
-          cpp: '10.2.0',
-          csharp: '6.12.0'
+          php: '8.2.3'
         };
 
         const fileNameMap: Record<string, string> = {
           python: 'main.py',
-          php: 'main.php',
-          cpp: 'main.cpp',
-          csharp: 'Main.cs'
+          php: 'main.php'
         };
 
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -201,37 +334,41 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
           });
 
           if (!response.ok) {
-            const errorText = await response.text().catch(() => '');
-            throw new Error(`HTTP error! status: ${response.status}${errorText ? ' - ' + errorText : ''}`);
-          }
-
-          const result = await response.json();
-
-          if (result.compile && result.compile.stderr) {
-            output = 'Compilation Error:\n' + result.compile.stderr;
+            output = getErrorMessageFromStatus(response.status);
             hasError = true;
-          } else if (result.run) {
-            if (result.run.stderr) {
-              output = 'Runtime Error:\n' + result.run.stderr;
-              hasError = true;
-            } else if (result.run.stdout) {
-              output = result.run.stdout;
-            } else {
-              output = '(No output)';
-            }
-
-            if (result.run.signal === 'SIGKILL') {
-              output = 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.';
-              hasError = true;
-            }
           } else {
-            output = 'Execution completed with no output';
+            const result = await response.json();
+
+            if (result.compile && result.compile.stderr) {
+              output = 'Compilation Error:\n' + result.compile.stderr;
+              hasError = true;
+            } else if (result.run) {
+              if (result.run.stderr && result.run.stdout) {
+                output = result.run.stdout + '\n\nStderr:\n' + result.run.stderr;
+              } else if (result.run.stderr) {
+                output = 'Runtime Error:\n' + result.run.stderr;
+                hasError = true;
+              } else if (result.run.stdout) {
+                output = result.run.stdout;
+              } else {
+                output = '(No output)';
+              }
+
+              if (result.run.signal === 'SIGKILL') {
+                output = 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.';
+                hasError = true;
+              }
+            } else {
+              output = 'Execution completed with no output';
+            }
           }
         } catch (e: any) {
           if (e.name === 'AbortError') {
-            output = 'Execution stopped by user.';
+            output = 'Eksekusi dihentikan oleh pengguna.';
+          } else if (e.name === 'TypeError') {
+            output = 'Error: Jaringan koneksi tidak stabil atau tidak terhubung ke internet.\nPastikan koneksi internet Anda aktif dan coba lagi.';
           } else {
-            output = 'Compiler Error: ' + e.message + '\n\nPastikan koneksi internet Anda stabil.';
+            output = 'Error: ' + e.message;
           }
           hasError = true;
         }
