@@ -22,12 +22,12 @@ const HomePage: React.FC<HomePageProps> = ({ navigateTo, navigateBack, canGoBack
         Platform Ujian Online
       </h1>
       <p className="text-lg text-gray-400 mb-12 text-center">
-        Lingkungan ujian online dengan pengawasan anti-curang
+        Pengawasan dari jarak jauh
       </p>
       <div className="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-6">
         <button 
           onClick={() => navigateTo('teacher_auth_choice')} 
-          className="flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105"
+          className="flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105"
         >
           <LockIcon /> Saya Dosen
         </button>
