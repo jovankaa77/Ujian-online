@@ -14,12 +14,10 @@ interface OptionData {
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 
-const SUPPORTED_LANGUAGES = ['php', 'python', 'javascript', 'htmlcss'] as const;
+const SUPPORTED_LANGUAGES = ['javascript', 'htmlcss'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
-  php: 'PHP',
-  python: 'Python',
   javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
@@ -35,7 +33,7 @@ const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
     { text: '', image: null }
   ]);
   const [correctAnswer, setCorrectAnswer] = useState(0);
-  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('php');
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('javascript');
   const questionImageRef = useRef<HTMLInputElement>(null);
   const optionImageRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null]);
 

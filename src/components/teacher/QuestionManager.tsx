@@ -7,10 +7,7 @@ import AddQuestionForm from './AddQuestionForm';
 import EditQuestionForm from './EditQuestionForm';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  php: 'PHP',
-  cpp: 'C++',
-  python: 'Python',
-  csharp: 'C#',
+  javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
 
@@ -202,7 +199,7 @@ const QuestionManager: React.FC<QuestionManagerProps> = ({ navigateBack, appStat
                     )}
                     {q.type === 'livecode' && (
                       <span className="text-xs bg-teal-600 text-white px-2 py-1 rounded mt-1 inline-block">
-                        Live Code - {LANGUAGE_LABELS[q.language || 'php'] || q.language}
+                        Live Code - {LANGUAGE_LABELS[q.language || 'javascript'] || q.language}
                       </span>
                     )}
                   </div>

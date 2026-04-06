@@ -1709,7 +1709,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               {q.type === 'livecode' && (
                 <LiveCodeEditor
                   questionId={q.id}
-                  language={q.language || 'php'}
+                  language={q.language || 'javascript'}
                   currentDraft={liveCodeDrafts[q.id]}
                   savedAnswer={answers[q.id]}
                   onDraftChange={handleLiveCodeDraftChange}

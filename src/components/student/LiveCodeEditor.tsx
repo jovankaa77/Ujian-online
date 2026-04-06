@@ -2,15 +2,11 @@ import { useRef, useCallback, useState, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  php: 'PHP',
-  python: 'Python',
   javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {
-  php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`,
-  python: `# Python Hello World\nprint("Hello, World!")`,
   javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`
 };
 
@@ -49,20 +45,8 @@ body {
 const WEB_DEFAULT_JS = `// JavaScript\nconsole.log("Hello from script.js");`;
 
 const MONACO_LANGUAGE_MAP: Record<string, string> = {
-  php: 'php',
-  python: 'python',
   javascript: 'javascript',
   htmlcss: 'html'
-};
-
-const PISTON_LANGUAGE_MAP: Record<string, string> = {
-  python: 'python',
-  php: 'php'
-};
-
-const PISTON_VERSION_MAP: Record<string, string> = {
-  python: '3.10.0',
-  php: '8.2.3'
 };
 
 const WEB_SEPARATOR = '\n<!--__WEB_TAB_SEPARATOR__-->\n';
@@ -263,28 +247,6 @@ function executeJavaScriptInWorker(code: string, timeout: number = 3000): Promis
   });
 }
 
-function getErrorMessageFromStatus(status: number, defaultMsg: string): string {
-  switch (status) {
-    case 429:
-      return 'Error: Terlalu banyak request. Harap tunggu beberapa detik sebelum menjalankan kode lagi.';
-    case 408:
-    case 504:
-      return 'Error: Waktu eksekusi habis (Timeout). Periksa apakah kode Anda memiliki perulangan tanpa henti (Infinite Loop).';
-    case 500:
-      return 'Error: Server eksekusi sedang bermasalah. Hubungi pengawas.';
-    case 502:
-    case 503:
-      return 'Error: Server eksekusi tidak tersedia sementara. Coba lagi dalam beberapa saat.';
-    case 400:
-      return 'Error: Request tidak valid. Periksa kode Anda.';
-    case 401:
-    case 403:
-      return 'Error: Akses ditolak ke server eksekusi.';
-    default:
-      return defaultMsg || `Error: Server mengembalikan status ${status}`;
-  }
-}
-
 interface LiveCodeEditorProps {
   questionId: string;
   language: string;
@@ -313,7 +275,6 @@ export default function LiveCodeEditor({
   codeMessage,
 }: LiveCodeEditorProps) {
   const editorRef = useRef<any>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const [codeOutput, setCodeOutput] = useState<{ output: string; error: boolean } | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [htmlPreview, setHtmlPreview] = useState(false);
@@ -402,13 +363,6 @@ export default function LiveCodeEditor({
     return 'javascript';
   };
 
-  const stopRunning = useCallback(() => {
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    setIsRunning(false);
-    setCodeOutput({ output: 'Eksekusi dihentikan oleh pengguna.', error: true });
-    abortControllerRef.current = null;
-  }, []);
-
   const runCode = useCallback(async () => {
     if (isWebMode) {
       setHtmlPreview(true);
@@ -432,87 +386,9 @@ export default function LiveCodeEditor({
       return;
     }
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    try {
-      const mappedLanguage = PISTON_LANGUAGE_MAP[language];
-      const mappedVersion = PISTON_VERSION_MAP[language];
-
-      if (!mappedLanguage || !mappedVersion) {
-        setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung untuk eksekusi server.', error: true });
-        setIsRunning(false);
-        return;
-      }
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseKey}`
-        },
-        body: JSON.stringify({
-          language: mappedLanguage,
-          version: mappedVersion,
-          files: [{ content: code }]
-        }),
-        signal: abortController.signal
-      });
-
-      if (!response.ok) {
-        const errorMsg = getErrorMessageFromStatus(response.status, '');
-        setCodeOutput({ output: errorMsg, error: true });
-        return;
-      }
-
-      const data = await response.json();
-
-      if (data.compile?.stderr?.trim()) {
-        setCodeOutput({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
-        return;
-      }
-
-      if (data.run?.signal === 'SIGKILL') {
-        setCodeOutput({
-          output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.',
-          error: true
-        });
-        return;
-      }
-
-      const hasStderr = data.run?.stderr?.trim();
-      const hasStdout = data.run?.stdout?.trim();
-
-      if (hasStderr && hasStdout) {
-        setCodeOutput({ output: String(data.run.stdout) + '\n\nStderr:\n' + String(data.run.stderr), error: false });
-      } else if (hasStderr) {
-        setCodeOutput({ output: 'Error:\n' + String(data.run.stderr), error: true });
-      } else {
-        const out = data.run?.stdout;
-        setCodeOutput({ output: out ? String(out) : 'Eksekusi berhasil tanpa output.', error: !out });
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        setCodeOutput({ output: 'Eksekusi dihentikan oleh pengguna.', error: true });
-      } else if (err.name === 'TypeError') {
-        setCodeOutput({
-          output: 'Error: Jaringan koneksi tidak stabil atau tidak terhubung ke internet.\nPastikan koneksi internet Anda aktif dan coba lagi.',
-          error: true
-        });
-      } else {
-        setCodeOutput({
-          output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'),
-          error: true
-        });
-      }
-    } finally {
-      setIsRunning(false);
-      abortControllerRef.current = null;
-    }
-  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language]);
+    setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
+    setIsRunning(false);
+  }, [isWebMode, isJavaScript, currentDraft, savedAnswer]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
   const showPreviewPanel = isWebMode && htmlPreview;
@@ -652,21 +528,17 @@ export default function LiveCodeEditor({
         >
           Batalkan Perubahan
         </button>
-        {isRunning ? (
-          <button
-            onClick={stopRunning}
-            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded animate-pulse transition-colors text-sm"
-          >
-            Stop Running
-          </button>
-        ) : (
-          <button
-            onClick={runCode}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors text-sm"
-          >
-            {isWebMode ? (htmlPreview ? 'Refresh Preview' : 'Preview') : 'Run Code'}
-          </button>
-        )}
+        <button
+          onClick={runCode}
+          disabled={isRunning}
+          className={`font-bold py-2 px-4 rounded transition-colors text-sm ${
+            isRunning
+              ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700 text-white'
+          }`}
+        >
+          {isRunning ? 'Running...' : (isWebMode ? (htmlPreview ? 'Refresh Preview' : 'Preview') : 'Run Code')}
+        </button>
       </div>
 
       {codeMessage && (

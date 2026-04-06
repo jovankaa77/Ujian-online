@@ -1,11 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import Editor from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  php: 'PHP',
-  python: 'Python',
   javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
@@ -96,7 +94,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
   const [htmlActiveTabs, setHtmlActiveTabs] = useState<{ [key: string]: WebTab }>({});
   const [htmlPreviewModes, setHtmlPreviewModes] = useState<{ [key: string]: PreviewMode }>({});
-  const abortControllersRef = useRef<{ [key: string]: AbortController }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
     const newScores = { ...essayScores };
@@ -108,19 +105,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     const newScores = { ...livecodeScores };
     newScores[questionId] = parseInt(score, 10) || 0;
     setLivecodeScores(newScores);
-  };
-
-  const stopRunningCode = (questionId: string) => {
-    const controller = abortControllersRef.current[questionId];
-    if (controller) {
-      controller.abort();
-    }
-    setRunningCode(prev => ({ ...prev, [questionId]: false }));
-    setCodeOutputs(prev => ({
-      ...prev,
-      [questionId]: { output: 'Execution stopped by user.', error: true }
-    }));
-    delete abortControllersRef.current[questionId];
   };
 
   const executeJavaScriptInWorker = (code: string, timeout: number = 3000): Promise<{ output: string; error: boolean }> => {
@@ -238,23 +222,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     });
   };
 
-  const getErrorMessageFromStatus = (status: number): string => {
-    switch (status) {
-      case 429:
-        return 'Error: Terlalu banyak request. Harap tunggu beberapa detik sebelum menjalankan kode lagi.';
-      case 408:
-      case 504:
-        return 'Error: Waktu eksekusi habis (Timeout). Periksa apakah kode memiliki perulangan tanpa henti (Infinite Loop).';
-      case 500:
-        return 'Error: Server eksekusi sedang bermasalah. Hubungi pengawas.';
-      case 502:
-      case 503:
-        return 'Error: Server eksekusi tidak tersedia sementara. Coba lagi dalam beberapa saat.';
-      default:
-        return `Error: Server mengembalikan status ${status}`;
-    }
-  };
-
   const runStudentCode = async (questionId: string, language: string) => {
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
@@ -282,107 +249,11 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       return;
     }
 
-    const abortController = new AbortController();
-    abortControllersRef.current[questionId] = abortController;
-
-    try {
-      let output = '';
-      let hasError = false;
-
-      if (language === 'python' || language === 'php') {
-        const pistonLanguageMap: Record<string, string> = {
-          python: 'python',
-          php: 'php'
-        };
-
-        const pistonVersionMap: Record<string, string> = {
-          python: '3.10.0',
-          php: '8.2.3'
-        };
-
-        const fileNameMap: Record<string, string> = {
-          python: 'main.py',
-          php: 'main.php'
-        };
-
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-        try {
-          const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${supabaseKey}`
-            },
-            body: JSON.stringify({
-              language: pistonLanguageMap[language],
-              version: pistonVersionMap[language],
-              files: [
-                {
-                  name: fileNameMap[language],
-                  content: code
-                }
-              ],
-              stdin: '',
-              args: [],
-              compile_timeout: 10000,
-              run_timeout: 5000
-            }),
-            signal: abortController.signal
-          });
-
-          if (!response.ok) {
-            output = getErrorMessageFromStatus(response.status);
-            hasError = true;
-          } else {
-            const result = await response.json();
-
-            if (result.compile && result.compile.stderr) {
-              output = 'Compilation Error:\n' + result.compile.stderr;
-              hasError = true;
-            } else if (result.run) {
-              if (result.run.stderr && result.run.stdout) {
-                output = result.run.stdout + '\n\nStderr:\n' + result.run.stderr;
-              } else if (result.run.stderr) {
-                output = 'Runtime Error:\n' + result.run.stderr;
-                hasError = true;
-              } else if (result.run.stdout) {
-                output = result.run.stdout;
-              } else {
-                output = '(No output)';
-              }
-
-              if (result.run.signal === 'SIGKILL') {
-                output = 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan infinite loop atau recursion tanpa batas.';
-                hasError = true;
-              }
-            } else {
-              output = 'Execution completed with no output';
-            }
-          }
-        } catch (e: any) {
-          if (e.name === 'AbortError') {
-            output = 'Eksekusi dihentikan oleh pengguna.';
-          } else if (e.name === 'TypeError') {
-            output = 'Error: Jaringan koneksi tidak stabil atau tidak terhubung ke internet.\nPastikan koneksi internet Anda aktif dan coba lagi.';
-          } else {
-            output = 'Error: ' + e.message;
-          }
-          hasError = true;
-        }
-      } else {
-        output = 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.';
-        hasError = true;
-      }
-
-      setCodeOutputs(prev => ({ ...prev, [questionId]: { output, error: hasError } }));
-    } catch (e: any) {
-      setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: ' + e.message, error: true } }));
-    } finally {
-      setRunningCode(prev => ({ ...prev, [questionId]: false }));
-      delete abortControllersRef.current[questionId];
-    }
+    setCodeOutputs(prev => ({
+      ...prev,
+      [questionId]: { output: 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.', error: true }
+    }));
+    setRunningCode(prev => ({ ...prev, [questionId]: false }));
   };
 
   const handleSaveAllScores = async () => {
@@ -635,7 +506,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                       <span className="text-teal-400">#{qIndex + 1}</span> {q.text || '(Soal bergambar)'}
                     </p>
                     <span className="text-xs bg-teal-600 text-white px-2 py-1 rounded">
-                      {LANGUAGE_LABELS[q.language || 'php']}
+                      {LANGUAGE_LABELS[q.language || 'javascript']}
                     </span>
                   </div>
                   {q.image && (
@@ -673,21 +544,17 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                   {session.answers[q.id] && (
                     <div className="mt-3">
                       <div className="flex gap-2">
-                        {runningCode[q.id] ? (
-                          <button
-                            onClick={() => stopRunningCode(q.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded animate-pulse"
-                          >
-                            Stop Running
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => runStudentCode(q.id, q.language || 'php')}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-                          >
-                            {isHtmlCss ? (htmlPreviews[q.id] ? 'Refresh Preview' : 'Preview') : 'Run Code'}
-                          </button>
-                        )}
+                        <button
+                          onClick={() => runStudentCode(q.id, q.language || 'javascript')}
+                          disabled={runningCode[q.id]}
+                          className={`font-bold py-2 px-4 rounded ${
+                            runningCode[q.id]
+                              ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                        >
+                          {runningCode[q.id] ? 'Running...' : (isHtmlCss ? (htmlPreviews[q.id] ? 'Refresh Preview' : 'Preview') : 'Run Code')}
+                        </button>
                       </div>
 
                       {codeOutputs[q.id] && (

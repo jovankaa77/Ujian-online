@@ -6,8 +6,6 @@ import autoTable from 'jspdf-autotable';
 import EssayGradingView from './EssayGradingView';
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  php: 'PHP',
-  python: 'Python',
   javascript: 'JavaScript',
   htmlcss: 'HTML & CSS'
 };
