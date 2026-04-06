@@ -19,8 +19,8 @@ type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   javascript: 'JavaScript',
-  python: 'Python',
-  php: 'PHP',
+  python: 'Pemograman Python',
+  php: 'Pemograman PHP',
   htmlcss: 'HTML & CSS'
 };
 
