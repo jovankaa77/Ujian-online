@@ -1,10 +1,12 @@
 import React, { useState, useRef } from 'react';
 
-const SUPPORTED_LANGUAGES = ['javascript', 'htmlcss'] as const;
+const SUPPORTED_LANGUAGES = ['javascript', 'python', 'php', 'htmlcss'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   javascript: 'JavaScript',
+  python: 'Python',
+  php: 'PHP',
   htmlcss: 'HTML & CSS'
 };
 
@@ -52,7 +54,11 @@ const EditQuestionForm: React.FC<EditQuestionFormProps> = ({ question, onSave, o
 
   const [options, setOptions] = useState<OptionData[]>(initialOptions);
   const [correctAnswer, setCorrectAnswer] = useState(question.type === 'mc' ? question.correctAnswer || 0 : 0);
-  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>((question.language === 'javascript' || question.language === 'htmlcss') ? question.language : 'javascript');
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>(
+    SUPPORTED_LANGUAGES.includes(question.language as SupportedLanguage)
+      ? question.language as SupportedLanguage
+      : 'javascript'
+  );
   const questionImageRef = useRef<HTMLInputElement>(null);
   const optionImageRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null]);
 

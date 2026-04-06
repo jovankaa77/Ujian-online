@@ -5,7 +5,14 @@ import Editor from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
+  python: 'Python',
+  php: 'PHP',
   htmlcss: 'HTML & CSS'
+};
+
+const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
+  python: { language: 'python', version: '3.10.0' },
+  php: { language: 'php', version: '8.2.3' }
 };
 
 interface Question {
@@ -247,6 +254,81 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       setCodeOutputs(prev => ({ ...prev, [questionId]: result }));
       setRunningCode(prev => ({ ...prev, [questionId]: false }));
       return;
+    }
+
+    const pistonConfig = PISTON_CONFIG[language];
+    if (pistonConfig) {
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseKey}`
+          },
+          body: JSON.stringify({
+            language: pistonConfig.language,
+            version: pistonConfig.version,
+            files: [{ content: code }]
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          let errorMsg = 'Error: Server mengembalikan status ' + response.status;
+          if (response.status === 429) errorMsg = 'Error: Terlalu banyak request.';
+          else if (response.status >= 500) errorMsg = 'Error: Server eksekusi bermasalah.';
+          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: errorMsg, error: true } }));
+          setRunningCode(prev => ({ ...prev, [questionId]: false }));
+          return;
+        }
+
+        const data = await response.json();
+
+        if (data.compile?.stderr?.trim()) {
+          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Compilation Error:\n' + data.compile.stderr, error: true } }));
+          setRunningCode(prev => ({ ...prev, [questionId]: false }));
+          return;
+        }
+
+        if (data.run?.signal === 'SIGKILL') {
+          setCodeOutputs(prev => ({
+            ...prev,
+            [questionId]: { output: 'Error: Program dihentikan (timeout/memory limit). Kemungkinan infinite loop.', error: true }
+          }));
+          setRunningCode(prev => ({ ...prev, [questionId]: false }));
+          return;
+        }
+
+        const hasStderr = data.run?.stderr?.trim();
+        const hasStdout = data.run?.stdout?.trim();
+
+        if (hasStderr && hasStdout) {
+          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: data.run.stdout + '\n\nWarning:\n' + data.run.stderr, error: false } }));
+        } else if (hasStderr) {
+          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error:\n' + data.run.stderr, error: true } }));
+        } else if (hasStdout) {
+          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: data.run.stdout, error: false } }));
+        } else {
+          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: '(Eksekusi berhasil tanpa output)', error: false } }));
+        }
+        setRunningCode(prev => ({ ...prev, [questionId]: false }));
+        return;
+      } catch (err: any) {
+        const errorMsg = err.name === 'AbortError'
+          ? 'Error: Timeout. Kemungkinan infinite loop.'
+          : 'Error: ' + (err.message || 'Gagal menjalankan kode');
+        setCodeOutputs(prev => ({ ...prev, [questionId]: { output: errorMsg, error: true } }));
+        setRunningCode(prev => ({ ...prev, [questionId]: false }));
+        return;
+      }
     }
 
     setCodeOutputs(prev => ({

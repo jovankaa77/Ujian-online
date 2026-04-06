@@ -8,6 +8,8 @@ import EditQuestionForm from './EditQuestionForm';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
+  python: 'Python',
+  php: 'PHP',
   htmlcss: 'HTML & CSS'
 };
 

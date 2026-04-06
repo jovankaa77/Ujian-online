@@ -3,11 +3,15 @@ import Editor, { OnMount } from '@monaco-editor/react';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
+  python: 'Python',
+  php: 'PHP',
   htmlcss: 'HTML & CSS'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {
-  javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`
+  javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`,
+  python: `# Python Hello World\nprint("Hello, World!")`,
+  php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`
 };
 
 const WEB_DEFAULT_HTML = `<!DOCTYPE html>
@@ -46,7 +50,14 @@ const WEB_DEFAULT_JS = `// JavaScript\nconsole.log("Hello from script.js");`;
 
 const MONACO_LANGUAGE_MAP: Record<string, string> = {
   javascript: 'javascript',
+  python: 'python',
+  php: 'php',
   htmlcss: 'html'
+};
+
+const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
+  python: { language: 'python', version: '3.10.0' },
+  php: { language: 'php', version: '8.2.3' }
 };
 
 const WEB_SEPARATOR = '\n<!--__WEB_TAB_SEPARATOR__-->\n';
@@ -386,9 +397,101 @@ export default function LiveCodeEditor({
       return;
     }
 
+    const pistonConfig = PISTON_CONFIG[language];
+    if (pistonConfig) {
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseKey}`
+          },
+          body: JSON.stringify({
+            language: pistonConfig.language,
+            version: pistonConfig.version,
+            files: [{ content: code }]
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          let errorMsg = 'Error: Server mengembalikan status ' + response.status;
+          if (response.status === 429) {
+            errorMsg = 'Error: Terlalu banyak request. Harap tunggu beberapa detik.';
+          } else if (response.status === 504 || response.status === 408) {
+            errorMsg = 'Error: Waktu eksekusi habis. Periksa apakah ada infinite loop.';
+          } else if (response.status >= 500) {
+            errorMsg = 'Error: Server eksekusi sedang bermasalah.';
+          }
+          setCodeOutput({ output: errorMsg, error: true });
+          setIsRunning(false);
+          return;
+        }
+
+        const data = await response.json();
+
+        if (data.compile?.stderr?.trim()) {
+          setCodeOutput({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
+          setIsRunning(false);
+          return;
+        }
+
+        if (data.run?.signal === 'SIGKILL') {
+          setCodeOutput({
+            output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan terjadi infinite loop atau recursion tanpa batas.\nPeriksa kembali logika perulangan/rekursi Anda.',
+            error: true
+          });
+          setIsRunning(false);
+          return;
+        }
+
+        const hasStderr = data.run?.stderr?.trim();
+        const hasStdout = data.run?.stdout?.trim();
+
+        if (hasStderr && hasStdout) {
+          setCodeOutput({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
+        } else if (hasStderr) {
+          setCodeOutput({ output: 'Error:\n' + String(data.run.stderr), error: true });
+        } else if (hasStdout) {
+          setCodeOutput({ output: String(data.run.stdout), error: false });
+        } else {
+          setCodeOutput({ output: '(Eksekusi berhasil tanpa output)', error: false });
+        }
+        setIsRunning(false);
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          setCodeOutput({
+            output: 'Error: Waktu eksekusi habis (timeout 15 detik).\nKemungkinan terjadi infinite loop. Periksa kembali logika perulangan Anda.',
+            error: true
+          });
+        } else if (err.name === 'TypeError') {
+          setCodeOutput({
+            output: 'Error: Tidak dapat terhubung ke server. Pastikan koneksi internet Anda aktif.',
+            error: true
+          });
+        } else {
+          setCodeOutput({
+            output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'),
+            error: true
+          });
+        }
+        setIsRunning(false);
+        return;
+      }
+    }
+
     setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
     setIsRunning(false);
-  }, [isWebMode, isJavaScript, currentDraft, savedAnswer]);
+  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
   const showPreviewPanel = isWebMode && htmlPreview;
@@ -454,6 +557,11 @@ export default function LiveCodeEditor({
           {isJavaScript && (
             <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded">
               Client-side
+            </span>
+          )}
+          {(language === 'python' || language === 'php') && (
+            <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded">
+              Server-side
             </span>
           )}
           <button
