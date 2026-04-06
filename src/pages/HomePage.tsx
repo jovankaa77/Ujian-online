@@ -18,8 +18,8 @@ const HomePage: React.FC<HomePageProps> = ({ navigateTo, navigateBack, canGoBack
           &larr; Kembali
         </button>
       )}
-      <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600 mb-4 text-center">
-        Platform Sistem dekteksi Ujian  Online
+      <h1 className="text-4xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-600 mb-4 text-center">
+        Platform Ujian Online
       </h1>
       <p className="text-lg text-gray-400 mb-12 text-center">
         Lingkungan ujian online dengan pengawasan anti-curang
