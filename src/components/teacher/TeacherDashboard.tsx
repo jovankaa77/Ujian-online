@@ -259,6 +259,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
     return (
       <StudentProfilesView
         navigateBack={handleBackToMain}
+        exam={currentExam}
       />
     );
   }
@@ -287,12 +288,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
           className={`py-2 px-4 whitespace-nowrap ${view === 'create' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400'}`}
         >
           Buat Ujian Baru
-        </button>
-        <button
-          onClick={() => handleNavigateToFeature('student_profiles', {})}
-          className="py-2 px-4 whitespace-nowrap text-gray-400 hover:text-white transition-colors"
-        >
-          Profil Peserta Ujian
         </button>
       </div>
 
@@ -442,6 +437,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                   className="bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
                 >
                   Verifikasi Wajah
+                </button>
+                <button
+                  onClick={() => handleNavigateToFeature('student_profiles', { exam: foundExam })}
+                  className="bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
+                >
+                  Profil Peserta Ujian
                 </button>
               </div>
             </div>

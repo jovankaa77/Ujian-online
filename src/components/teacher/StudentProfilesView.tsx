@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 interface Student {
@@ -12,14 +12,14 @@ interface Student {
   university: string;
   whatsapp: string;
   profilePhoto: string | null;
-  createdAt: any;
 }
 
 interface StudentProfilesViewProps {
   navigateBack: () => void;
+  exam: any;
 }
 
-const StudentProfilesView: React.FC<StudentProfilesViewProps> = ({ navigateBack }) => {
+const StudentProfilesView: React.FC<StudentProfilesViewProps> = ({ navigateBack, exam }) => {
   const [students, setStudents] = useState<Student[]>([]);
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,22 +28,50 @@ const StudentProfilesView: React.FC<StudentProfilesViewProps> = ({ navigateBack 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   useEffect(() => {
-    const fetchStudents = async () => {
+    const fetchStudentsByExam = async () => {
+      if (!exam?.id) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        const studentsRef = collection(db, `artifacts/${appId}/public/data/students`);
-        const snapshot = await getDocs(studentsRef);
-        const studentList: Student[] = snapshot.docs.map(doc => ({
-          id: doc.id,
-          username: doc.data().username || '',
-          fullName: doc.data().fullName || '',
-          nim: doc.data().nim || '',
-          className: doc.data().className || '',
-          major: doc.data().major || '',
-          university: doc.data().university || '',
-          whatsapp: doc.data().whatsapp || '',
-          profilePhoto: doc.data().profilePhoto || null,
-          createdAt: doc.data().createdAt
-        }));
+        const studentIds = new Set<string>();
+
+        const appsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/applications`);
+        const appsSnapshot = await getDocs(appsRef);
+        appsSnapshot.docs.forEach(d => {
+          const sid = d.data().studentId;
+          if (sid) studentIds.add(sid);
+        });
+
+        const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+        const sessionsSnapshot = await getDocs(sessionsRef);
+        sessionsSnapshot.docs.forEach(d => {
+          const sid = d.data().studentId;
+          if (sid) studentIds.add(sid);
+        });
+
+        const studentList: Student[] = [];
+        const ids = Array.from(studentIds);
+
+        for (const sid of ids) {
+          const studentDoc = await getDoc(doc(db, `artifacts/${appId}/public/data/students`, sid));
+          if (studentDoc.exists()) {
+            const data = studentDoc.data();
+            studentList.push({
+              id: studentDoc.id,
+              username: data.username || '',
+              fullName: data.fullName || '',
+              nim: data.nim || '',
+              className: data.className || '',
+              major: data.major || '',
+              university: data.university || '',
+              whatsapp: data.whatsapp || '',
+              profilePhoto: data.profilePhoto || null,
+            });
+          }
+        }
+
         studentList.sort((a, b) => a.fullName.localeCompare(b.fullName));
         setStudents(studentList);
         setFilteredStudents(studentList);
@@ -53,8 +81,9 @@ const StudentProfilesView: React.FC<StudentProfilesViewProps> = ({ navigateBack 
         setIsLoading(false);
       }
     };
-    fetchStudents();
-  }, []);
+
+    fetchStudentsByExam();
+  }, [exam]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -91,7 +120,13 @@ const StudentProfilesView: React.FC<StudentProfilesViewProps> = ({ navigateBack 
         &larr; Kembali
       </button>
 
-      <h2 className="text-2xl font-bold mb-6">Profil Peserta Ujian</h2>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold">Profil Peserta Ujian</h2>
+        <p className="text-gray-400 text-sm mt-1">
+          Ujian: <span className="font-semibold text-white">{exam?.name}</span>
+          {' '} — Kode: <span className="font-mono bg-gray-700 px-2 py-0.5 rounded text-white">{exam?.code}</span>
+        </p>
+      </div>
 
       <div className="mb-6">
         <div className="relative">
@@ -123,7 +158,7 @@ const StudentProfilesView: React.FC<StudentProfilesViewProps> = ({ navigateBack 
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           <p className="text-gray-400 text-lg">
-            {searchQuery ? 'Tidak ada peserta yang cocok dengan pencarian.' : 'Belum ada peserta ujian terdaftar.'}
+            {searchQuery ? 'Tidak ada peserta yang cocok dengan pencarian.' : 'Belum ada peserta yang bergabung di ujian ini.'}
           </p>
         </div>
       ) : (

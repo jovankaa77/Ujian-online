@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
@@ -54,14 +54,17 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
       setIsCameraOpen(true);
     } catch (err) {
       setError('Gagal mengakses kamera. Pastikan izin kamera diaktifkan.');
     }
   }, []);
+
+  useEffect(() => {
+    if (isCameraOpen && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [isCameraOpen]);
 
   const closeCamera = useCallback(() => {
     if (streamRef.current) {
@@ -214,12 +217,23 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
             <h3 className="text-lg font-semibold text-gray-300 border-b border-gray-600 pb-2 mb-4">Foto Profil</h3>
             <div className="flex flex-col items-center">
               {profilePhoto ? (
-                <div className="relative">
-                  <img
-                    src={profilePhoto}
-                    alt="Foto profil"
-                    className="w-40 h-40 rounded-full object-cover border-4 border-green-500"
-                  />
+                <div className="w-full">
+                  <div className="bg-green-900 border border-green-600 rounded-lg p-2 mb-3 text-center">
+                    <p className="text-green-300 text-sm font-medium">Foto berhasil diambil</p>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <img
+                      src={profilePhoto}
+                      alt="Preview foto profil"
+                      className="w-full max-w-xs rounded-lg object-cover border-2 border-green-500 mb-2"
+                    />
+                    <img
+                      src={profilePhoto}
+                      alt="Foto profil bulat"
+                      className="w-24 h-24 rounded-full object-cover border-4 border-green-500 -mt-14 ring-4 ring-gray-800"
+                    />
+                    <p className="text-gray-400 text-xs mt-2">Preview tampilan foto profil</p>
+                  </div>
                   <button
                     type="button"
                     onClick={retakePhoto}
