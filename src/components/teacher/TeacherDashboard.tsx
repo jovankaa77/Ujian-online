@@ -10,6 +10,7 @@ import QuestionManager from './QuestionManager';
 import TeacherAttendanceRecap from './TeacherAttendanceRecap';
 import TeacherVoiceMonitoring from './TeacherVoiceMonitoring';
 import FaceVerificationDashboard from './FaceVerificationDashboard';
+import StudentProfilesView from './StudentProfilesView';
 
 interface TeacherDashboardProps {
   user?: any;
@@ -20,7 +21,7 @@ interface TeacherDashboardProps {
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, navigateBack, canGoBack }) => {
   const [view, setView] = useState('search');
-  const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap' | 'voice_monitoring' | 'face_verification'>('main');
+  const [currentView, setCurrentView] = useState<'main' | 'student_confirmation' | 'teacher_results' | 'teacher_proctoring' | 'question_manager' | 'attendance_recap' | 'voice_monitoring' | 'face_verification' | 'student_profiles'>('main');
   const [searchCode, setSearchCode] = useState('');
   const [foundExam, setFoundExam] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -99,6 +100,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
         break;
       case 'face_verification':
         setCurrentView('face_verification');
+        break;
+      case 'student_profiles':
+        setCurrentView('student_profiles');
         break;
       default:
         navigateTo(page, data);
@@ -251,6 +255,14 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
     );
   }
 
+  if (currentView === 'student_profiles') {
+    return (
+      <StudentProfilesView
+        navigateBack={handleBackToMain}
+      />
+    );
+  }
+
   // Main dashboard view
   return (
     <div>
@@ -263,18 +275,24 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
         </button>
       )}
       <h2 className="text-3xl font-bold mb-6">Dasbor Dosen</h2>
-      <div className="flex space-x-4 mb-6 border-b border-gray-700">
-        <button 
-          onClick={() => setView('search')} 
-          className={`py-2 px-4 ${view === 'search' ? 'border-b-2 border-indigo-500 text-white' : 'text-gray-400'}`}
+      <div className="flex space-x-4 mb-6 border-b border-gray-700 overflow-x-auto">
+        <button
+          onClick={() => setView('search')}
+          className={`py-2 px-4 whitespace-nowrap ${view === 'search' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400'}`}
         >
           Cari Ujian
         </button>
-        <button 
-          onClick={() => setView('create')} 
-          className={`py-2 px-4 ${view === 'create' ? 'border-b-2 border-indigo-500 text-white' : 'text-gray-400'}`}
+        <button
+          onClick={() => setView('create')}
+          className={`py-2 px-4 whitespace-nowrap ${view === 'create' ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400'}`}
         >
           Buat Ujian Baru
+        </button>
+        <button
+          onClick={() => handleNavigateToFeature('student_profiles', {})}
+          className="py-2 px-4 whitespace-nowrap text-gray-400 hover:text-white transition-colors"
+        >
+          Profil Peserta Ujian
         </button>
       </div>
 
