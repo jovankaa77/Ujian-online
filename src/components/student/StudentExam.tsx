@@ -1078,7 +1078,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         (e.ctrlKey && e.shiftKey && e.key === 'I') ||
         (e.ctrlKey && e.shiftKey && e.key === 'J') ||
         (e.ctrlKey && e.key === 'u') ||
-        (e.ctrlKey && e.key === 's') || // Block save
+
         (e.key === 'PrintScreen') || // Block screenshot
         e.altKey && e.key === 'Tab'
       ) {
