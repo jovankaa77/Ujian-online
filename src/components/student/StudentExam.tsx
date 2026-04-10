@@ -1071,7 +1071,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     const handleKeyDown = (e: KeyboardEvent) => {
       // Block common cheating shortcuts
       if (
-        e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 'a' || e.key === 't' || e.key === 'n' || e.key === 'w') ||
+        e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 't' || e.key === 'n' || e.key === 'w') ||
         e.key === 'F12' ||
         e.key === 'F11' || // Block F11 fullscreen toggle
         e.key === 'Escape' || // Block Escape key (exits fullscreen)
@@ -1085,7 +1085,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         e.preventDefault();
         if (e.key === 'PrintScreen') {
           handleViolation("Screenshot Attempt");
-        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 'a')) {
+        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'v')) {
           handleViolation("Copy/Paste Attempt");
         } else {
           handleViolation("Prohibited Shortcut");
