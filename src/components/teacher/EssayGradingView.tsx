@@ -7,7 +7,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
   python: 'Python',
   php: 'PHP',
-  htmlcss: 'HTML & CSS'
+  htmlcss: 'HTML, CSS Dan Javascript'
 };
 
 const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
@@ -393,7 +393,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       <div className="mt-3 space-y-3">
         <div className="rounded-lg border border-gray-600 overflow-hidden bg-gray-900">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
-            <span className="text-sm font-bold text-gray-300">Kode Siswa - HTML & CSS</span>
+            <span className="text-sm font-bold text-gray-300">Kode Siswa - HTML, CSS Dan Javascript</span>
             <button
               onClick={() => setHtmlPreviews(prev => {
                 const newPreviews = { ...prev };

@@ -5,7 +5,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
   python: 'Pemograman Python',
   php: 'Pemograman PHP',
-  htmlcss: 'HTML & CSS'
+  htmlcss: 'HTML, CSS Dan Javascript'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {

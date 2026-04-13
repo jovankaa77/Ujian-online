@@ -21,7 +21,7 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   javascript: 'JavaScript',
   python: 'Pemograman Python',
   php: 'Pemograman PHP',
-  htmlcss: 'HTML & CSS'
+  htmlcss: 'HTML, CSS Dan Javascript'
 };
 
 const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
