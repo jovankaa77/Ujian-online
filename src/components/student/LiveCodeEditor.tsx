@@ -78,25 +78,218 @@ function deserializeWebTabs(combined: string): { html: string; css: string; js: 
 }
 
 function buildSecureWebPreview(html: string, css: string, js: string): string {
+  const securityScript = `
+(function() {
+  var WARNING_DURATION = 4000;
+  var warningEl = null;
+  var warningTimeout = null;
+
+  function showNavigationWarning(msg) {
+    if (warningEl) { warningEl.remove(); clearTimeout(warningTimeout); }
+    warningEl = document.createElement('div');
+    warningEl.textContent = msg || 'Element yang anda klik menyebabkan keluar halaman';
+    warningEl.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#dc2626;color:#fff;padding:10px 16px;font-size:14px;font-family:sans-serif;font-weight:600;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    document.body.appendChild(warningEl);
+    warningTimeout = setTimeout(function() { if (warningEl) { warningEl.remove(); warningEl = null; } }, WARNING_DURATION);
+  }
+
+  function showInPageDialog(type, message, defaultVal) {
+    return new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
+      var box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:8px;padding:20px 24px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+      var titleEl = document.createElement('div');
+      titleEl.style.cssText = 'font-size:11px;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;';
+      titleEl.textContent = type === 'alert' ? 'Alert' : type === 'confirm' ? 'Confirm' : 'Prompt';
+      box.appendChild(titleEl);
+      var msgEl = document.createElement('div');
+      msgEl.style.cssText = 'font-size:14px;color:#333;margin-bottom:16px;white-space:pre-wrap;word-break:break-word;';
+      msgEl.textContent = message || '';
+      box.appendChild(msgEl);
+
+      var input = null;
+      if (type === 'prompt') {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.value = defaultVal != null ? String(defaultVal) : '';
+        input.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:14px;margin-bottom:12px;box-sizing:border-box;outline:none;';
+        input.addEventListener('focus', function() { input.style.borderColor = '#3b82f6'; });
+        input.addEventListener('blur', function() { input.style.borderColor = '#ccc'; });
+        box.appendChild(input);
+      }
+
+      var btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;';
+
+      if (type === 'alert') {
+        var okBtn = document.createElement('button');
+        okBtn.textContent = 'OK';
+        okBtn.style.cssText = 'padding:6px 20px;background:#3b82f6;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;';
+        okBtn.onclick = function() { overlay.remove(); resolve(undefined); };
+        btnRow.appendChild(okBtn);
+      } else {
+        var cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.cssText = 'padding:6px 16px;background:#e5e7eb;color:#333;border:none;border-radius:4px;font-size:13px;cursor:pointer;';
+        cancelBtn.onclick = function() { overlay.remove(); resolve(type === 'confirm' ? false : null); };
+        btnRow.appendChild(cancelBtn);
+        var okBtn2 = document.createElement('button');
+        okBtn2.textContent = 'OK';
+        okBtn2.style.cssText = 'padding:6px 20px;background:#3b82f6;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;';
+        okBtn2.onclick = function() { overlay.remove(); resolve(type === 'confirm' ? true : (input ? input.value : '')); };
+        btnRow.appendChild(okBtn2);
+      }
+
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      if (input) input.focus();
+    });
+  }
+
+  window.alert = function(msg) {
+    showInPageDialog('alert', msg != null ? String(msg) : '');
+  };
+  window.confirm = function(msg) {
+    showInPageDialog('confirm', msg != null ? String(msg) : '');
+    return false;
+  };
+  window.prompt = function(msg, def) {
+    showInPageDialog('prompt', msg != null ? String(msg) : '', def);
+    return null;
+  };
+
+  window.open = function(url) {
+    if (url && typeof url === 'string' && (url.startsWith('http') || url.startsWith('//'))) {
+      showNavigationWarning();
+    }
+    return null;
+  };
+  window.print = function() {};
+
+  var locDesc = Object.getOwnPropertyDescriptor(window, 'location');
+  var fakeLocation = {
+    get href() { return ''; },
+    set href(v) { showNavigationWarning(); },
+    assign: function() { showNavigationWarning(); },
+    replace: function() { showNavigationWarning(); },
+    reload: function() {}
+  };
+  try {
+    Object.defineProperty(window, 'location', {
+      get: function() { return fakeLocation; },
+      set: function() { showNavigationWarning(); },
+      configurable: true
+    });
+  } catch(e) {}
+
+  var origDocWrite = document.write.bind(document);
+  document.write = function(content) {
+    if (typeof content === 'string' && (content.indexOf('http-equiv') !== -1 || content.indexOf('url=') !== -1 || content.indexOf('location') !== -1)) {
+      showNavigationWarning();
+      return;
+    }
+    origDocWrite(content);
+  };
+  document.writeln = document.write;
+
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    while (target && target !== document.body) {
+      if (target.tagName === 'A') {
+        var href = target.getAttribute('href');
+        if (href && href !== '#' && !href.startsWith('#') && !href.startsWith('javascript:void')) {
+          e.preventDefault();
+          e.stopPropagation();
+          showNavigationWarning();
+          return;
+        }
+      }
+      target = target.parentElement;
+    }
+  }, true);
+
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (form && form.tagName === 'FORM') {
+      var action = (form.getAttribute('action') || '').trim();
+      if (action && action !== '#' && !action.startsWith('#')) {
+        e.preventDefault();
+        e.stopPropagation();
+        showNavigationWarning();
+        return;
+      }
+    }
+  }, true);
+
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    while (target && target !== document.body) {
+      if (target.tagName === 'BUTTON' || target.tagName === 'INPUT') {
+        var onclickAttr = target.getAttribute('onclick') || '';
+        if (onclickAttr) {
+          var dangerous = /(window\\.open|window\\.location|document\\.location|location\\.href|location\\.assign|location\\.replace|document\\.write|closeModal|openModal)/.test(onclickAttr);
+          if (dangerous) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showNavigationWarning();
+            return;
+          }
+        }
+      }
+      target = target.parentElement;
+    }
+  }, true);
+
+  var origAddEventListener = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (type === 'click' && typeof listener === 'function') {
+      var wrappedListener = function(e) {
+        var result = listener.call(this, e);
+        return result;
+      };
+      return origAddEventListener.call(this, type, wrappedListener, options);
+    }
+    return origAddEventListener.call(this, type, listener, options);
+  };
+
+  var allMetas = document.querySelectorAll('meta[http-equiv="refresh"]');
+  for (var i = 0; i < allMetas.length; i++) { allMetas[i].remove(); }
+  new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      m.addedNodes.forEach(function(node) {
+        if (node.tagName === 'META' && node.getAttribute && node.getAttribute('http-equiv') === 'refresh') {
+          node.remove();
+          showNavigationWarning();
+        }
+        if (node.tagName === 'A') {
+          var href = node.getAttribute('href');
+          if (href && href !== '#' && !href.startsWith('#') && !href.startsWith('javascript:void')) {
+            node.addEventListener('click', function(e) { e.preventDefault(); showNavigationWarning(); });
+          }
+        }
+      });
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  var logCount = 0;
+  var origLog = console.log;
+  console.log = function() {
+    if (logCount < 50) { logCount++; origLog.apply(console, arguments); }
+  };
+
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'SCROLL_PREVIEW') {
+      window.scrollBy(0, e.data.deltaY);
+    }
+  });
+})();`;
+
   return `<html>
 <head>
-<script>
-window.alert = function(msg) { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Alert diblokir: ' + msg}, '*'); };
-window.confirm = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Confirm diblokir'}, '*'); return false; };
-window.prompt = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Prompt diblokir'}, '*'); return null; };
-window.open = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Membuka tab baru diblokir demi keamanan ujian!'}, '*'); return null; };
-window.print = function() { window.parent.postMessage({type:'BLOCKED_ACTION', msg:'Fitur Print diblokir!'}, '*'); };
-var logCount = 0;
-var origLog = console.log;
-console.log = function() {
-  if (logCount < 50) { logCount++; origLog.apply(console, arguments); }
-};
-window.addEventListener('message', function(e) {
-  if (e.data && e.data.type === 'SCROLL_PREVIEW') {
-    window.scrollBy(0, e.data.deltaY);
-  }
-});
-</script>
+<script>${securityScript}<\/script>
 <style>${css}</style>
 </head>
 <body>
@@ -830,21 +1023,6 @@ function WebModeLayout({
           </div>
 
           <div className="bg-gray-100 flex justify-center relative" style={{ height: '480px', overflow: 'hidden' }}>
-            <div
-              className="absolute inset-0"
-              style={{ zIndex: 50, background: 'transparent', cursor: 'default' }}
-              onWheel={(e) => {
-                e.preventDefault();
-                const iframe = e.currentTarget.parentElement?.querySelector('iframe') as HTMLIFrameElement | null;
-                if (iframe?.contentWindow) {
-                  iframe.contentWindow.postMessage({ type: 'SCROLL_PREVIEW', deltaY: e.deltaY }, '*');
-                }
-              }}
-              onClick={(e) => e.preventDefault()}
-              onMouseDown={(e) => e.preventDefault()}
-              onTouchStart={(e) => e.preventDefault()}
-              onContextMenu={(e) => e.preventDefault()}
-            />
             <iframe
               srcDoc={buildSecureWebPreview(webHtml, webCss, webJs)}
               title={`Web Preview ${questionId}`}
@@ -853,7 +1031,6 @@ function WebModeLayout({
               style={{
                 width: previewMode === 'mobile' ? '375px' : '100%',
                 height: '100%',
-                pointerEvents: 'none',
                 ...(previewMode === 'mobile' ? {
                   boxShadow: '0 0 0 8px #1f2937, 0 0 0 10px #374151, 0 8px 32px rgba(0,0,0,0.3)',
                   borderRadius: '12px',
