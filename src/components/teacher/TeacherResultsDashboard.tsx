@@ -69,6 +69,9 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [isUpdatingScore, setIsUpdatingScore] = useState(false);
   const [scoreError, setScoreError] = useState('');
   const [historySession, setHistorySession] = useState<Session | null>(null);
+  const [editingAnswers, setEditingAnswers] = useState<{ [questionId: string]: number | string }>({});
+  const [isEditingAnswers, setIsEditingAnswers] = useState(false);
+  const [isSavingAnswers, setIsSavingAnswers] = useState(false);
 
   const handleBackNavigation = () => {
     navigateBack();
@@ -244,6 +247,41 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
 
     const finalScore = Math.max(0, baseScore - reduction);
     return finalScore.toFixed(2);
+  };
+
+  const handleOpenHistory = (session: Session) => {
+    setHistorySession(session);
+    setEditingAnswers({ ...(session.answers || {}) });
+    setIsEditingAnswers(false);
+  };
+
+  const handleSaveEditedAnswers = async () => {
+    if (!historySession) return;
+    setIsSavingAnswers(true);
+    try {
+      const mcQuestions = questions.filter(q => q.type === 'mc');
+      let correct = 0;
+      mcQuestions.forEach(q => {
+        if (editingAnswers[q.id] === q.correctAnswer) correct++;
+      });
+      const newFinalScore = mcQuestions.length > 0 ? (correct / mcQuestions.length) * 100 : 0;
+
+      const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, historySession.id);
+      await updateDoc(sessionDocRef, {
+        answers: editingAnswers,
+        finalScore: newFinalScore,
+      });
+
+      const updatedSession = { ...historySession, answers: editingAnswers, finalScore: newFinalScore };
+      setSessions(prev => prev.map(s => s.id === historySession.id ? updatedSession : s));
+      setHistorySession(updatedSession);
+      setIsEditingAnswers(false);
+    } catch (error) {
+      console.error('Error saving edited answers:', error);
+      alert('Gagal menyimpan jawaban. Silakan coba lagi.');
+    } finally {
+      setIsSavingAnswers(false);
+    }
   };
 
   const handleEditScore = (session: Session) => {
@@ -628,29 +666,69 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex justify-between items-center p-6 border-b border-gray-700">
               <div>
-                <h3 className="text-xl font-bold">History Pengerjaan</h3>
+                <h3 className="text-xl font-bold">History Pengerjaan PG</h3>
                 <p className="text-gray-400 text-sm mt-1">
                   {historySession.studentInfo.name || historySession.studentInfo.fullName} - {historySession.studentInfo.nim}
                 </p>
               </div>
-              <button
-                onClick={() => setHistorySession(null)}
-                className="text-gray-400 hover:text-white text-2xl"
-              >
-                x
-              </button>
+              <div className="flex items-center gap-3">
+                {!isEditingAnswers ? (
+                  <button
+                    onClick={() => setIsEditingAnswers(true)}
+                    className="bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold py-1.5 px-4 rounded-lg"
+                  >
+                    Edit Jawaban
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setIsEditingAnswers(false);
+                        setEditingAnswers({ ...(historySession.answers || {}) });
+                      }}
+                      className="bg-gray-600 hover:bg-gray-500 text-white text-sm font-bold py-1.5 px-4 rounded-lg"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      onClick={handleSaveEditedAnswers}
+                      disabled={isSavingAnswers}
+                      className="bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-1.5 px-4 rounded-lg disabled:bg-green-400"
+                    >
+                      {isSavingAnswers ? 'Menyimpan...' : 'Simpan Perubahan'}
+                    </button>
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    setHistorySession(null);
+                    setIsEditingAnswers(false);
+                  }}
+                  className="text-gray-400 hover:text-white text-2xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
             </div>
+
+            {isEditingAnswers && (
+              <div className="px-6 py-3 bg-orange-900/30 border-b border-orange-700 text-orange-300 text-sm">
+                Mode edit aktif — pilih jawaban yang ingin diubah. Nilai PG akan dihitung ulang otomatis setelah disimpan.
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-6">
               {(() => {
                 const mcQuestions = questions.filter(q => q.type === 'mc');
+                const activeAnswers = isEditingAnswers ? editingAnswers : (historySession.answers || {});
+
                 const correctAnswers: Question[] = [];
                 const wrongAnswers: Question[] = [];
                 const unanswered: Question[] = [];
 
                 mcQuestions.forEach(q => {
-                  const studentAnswer = historySession.answers?.[q.id];
-                  if (studentAnswer === undefined || studentAnswer === null) {
+                  const studentAnswer = activeAnswers[q.id];
+                  if (studentAnswer === undefined || studentAnswer === null || studentAnswer === '') {
                     unanswered.push(q);
                   } else if (studentAnswer === q.correctAnswer) {
                     correctAnswers.push(q);
@@ -658,6 +736,50 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                     wrongAnswers.push(q);
                   }
                 });
+
+                const renderOptions = (q: Question) => {
+                  if (!isEditingAnswers) return null;
+                  const currentAnswer = editingAnswers[q.id];
+                  return (
+                    <div className="mt-3 space-y-1">
+                      <p className="text-xs text-gray-400 mb-2">Ubah jawaban:</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => {
+                            const updated = { ...editingAnswers };
+                            delete updated[q.id];
+                            setEditingAnswers(updated);
+                          }}
+                          className={`px-3 py-1 rounded text-xs font-bold border ${
+                            currentAnswer === undefined || currentAnswer === null || currentAnswer === ''
+                              ? 'bg-gray-500 border-gray-400 text-white'
+                              : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+                          }`}
+                        >
+                          Kosong
+                        </button>
+                        {q.options?.map((opt, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setEditingAnswers(prev => ({ ...prev, [q.id]: idx }))}
+                            className={`px-3 py-1 rounded text-xs font-bold border ${
+                              currentAnswer === idx
+                                ? idx === q.correctAnswer
+                                  ? 'bg-green-600 border-green-400 text-white'
+                                  : 'bg-red-600 border-red-400 text-white'
+                                : idx === q.correctAnswer
+                                  ? 'bg-gray-700 border-green-600 text-green-300 hover:bg-green-900/40'
+                                  : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+                            }`}
+                          >
+                            {String.fromCharCode(65 + idx)}{idx === q.correctAnswer ? ' ✓' : ''}
+                            {opt ? ` - ${opt.length > 30 ? opt.substring(0, 30) + '…' : opt}` : ''}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                };
 
                 return (
                   <div className="space-y-6">
@@ -676,31 +798,53 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                       </div>
                     </div>
 
-                    {correctAnswers.length > 0 && (
+                    {isEditingAnswers && (
+                      <div className="bg-gray-700 border border-gray-500 p-3 rounded-lg text-center">
+                        <span className="text-gray-300 text-sm">Preview nilai PG setelah edit: </span>
+                        <span className="text-white font-bold text-lg ml-2">
+                          {mcQuestions.length > 0
+                            ? ((correctAnswers.length / mcQuestions.length) * 100).toFixed(2)
+                            : '0.00'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* All MC questions in edit mode */}
+                    {isEditingAnswers && (
                       <div>
-                        <h4 className="text-lg font-bold text-green-400 mb-3 flex items-center gap-2">
-                          <span className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-sm">V</span>
-                          Jawaban Benar ({correctAnswers.length})
-                        </h4>
+                        <h4 className="text-lg font-bold text-orange-400 mb-3">Semua Soal PG ({mcQuestions.length})</h4>
                         <div className="space-y-3">
-                          {correctAnswers.map((q, idx) => {
+                          {mcQuestions.map(q => {
                             const qIndex = questions.findIndex(question => question.id === q.id);
-                            const studentAnswer = historySession.answers?.[q.id] as number;
+                            const currentAnswer = editingAnswers[q.id];
+                            const isEmpty = currentAnswer === undefined || currentAnswer === null || currentAnswer === '';
+                            const isCorrect = !isEmpty && currentAnswer === q.correctAnswer;
                             return (
-                              <div key={q.id} className="bg-green-900/30 border border-green-700 p-4 rounded-lg">
+                              <div key={q.id} className={`border p-4 rounded-lg ${
+                                isEmpty ? 'bg-gray-700/50 border-gray-600'
+                                : isCorrect ? 'bg-green-900/30 border-green-700'
+                                : 'bg-red-900/30 border-red-700'
+                              }`}>
                                 <div className="flex items-start gap-3">
-                                  <span className="bg-green-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                  <span className={`text-white text-sm font-bold px-2 py-1 rounded ${
+                                    isEmpty ? 'bg-gray-600' : isCorrect ? 'bg-green-600' : 'bg-red-600'
+                                  }`}>
                                     #{qIndex + 1}
                                   </span>
                                   <div className="flex-1">
-                                    <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
-                                    {q.image && (
-                                      <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />
-                                    )}
-                                    <div className="text-sm text-green-300">
-                                      Jawaban: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
-                                      {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
+                                    <p className="font-medium mb-1">{q.text || '(Soal bergambar)'}</p>
+                                    {q.image && <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />}
+                                    <div className="text-sm">
+                                      {isEmpty ? (
+                                        <span className="text-gray-400">Belum dijawab</span>
+                                      ) : (
+                                        <span className={isCorrect ? 'text-green-300' : 'text-red-300'}>
+                                          Jawaban: <span className="font-bold">{String.fromCharCode(65 + (currentAnswer as number))}</span>
+                                          {q.options?.[currentAnswer as number] && ` - ${q.options[currentAnswer as number]}`}
+                                        </span>
+                                      )}
                                     </div>
+                                    {renderOptions(q)}
                                   </div>
                                 </div>
                               </div>
@@ -710,83 +854,116 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                       </div>
                     )}
 
-                    {wrongAnswers.length > 0 && (
-                      <div>
-                        <h4 className="text-lg font-bold text-red-400 mb-3 flex items-center gap-2">
-                          <span className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-sm">X</span>
-                          Jawaban Salah ({wrongAnswers.length})
-                        </h4>
-                        <div className="space-y-3">
-                          {wrongAnswers.map((q, idx) => {
-                            const qIndex = questions.findIndex(question => question.id === q.id);
-                            const studentAnswer = historySession.answers?.[q.id] as number;
-                            return (
-                              <div key={q.id} className="bg-red-900/30 border border-red-700 p-4 rounded-lg">
-                                <div className="flex items-start gap-3">
-                                  <span className="bg-red-600 text-white text-sm font-bold px-2 py-1 rounded">
-                                    #{qIndex + 1}
-                                  </span>
-                                  <div className="flex-1">
-                                    <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
-                                    {q.image && (
-                                      <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />
-                                    )}
-                                    <div className="text-sm space-y-1">
-                                      <div className="text-red-300">
-                                        Jawaban Siswa: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
-                                        {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
+                    {/* View mode: grouped by correct/wrong/unanswered */}
+                    {!isEditingAnswers && (
+                      <>
+                        {correctAnswers.length > 0 && (
+                          <div>
+                            <h4 className="text-lg font-bold text-green-400 mb-3 flex items-center gap-2">
+                              <span className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center text-sm">V</span>
+                              Jawaban Benar ({correctAnswers.length})
+                            </h4>
+                            <div className="space-y-3">
+                              {correctAnswers.map(q => {
+                                const qIndex = questions.findIndex(question => question.id === q.id);
+                                const studentAnswer = activeAnswers[q.id] as number;
+                                return (
+                                  <div key={q.id} className="bg-green-900/30 border border-green-700 p-4 rounded-lg">
+                                    <div className="flex items-start gap-3">
+                                      <span className="bg-green-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                        #{qIndex + 1}
+                                      </span>
+                                      <div className="flex-1">
+                                        <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
+                                        {q.image && <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />}
+                                        <div className="text-sm text-green-300">
+                                          Jawaban: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
+                                          {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
+                                        </div>
                                       </div>
-                                      <div className="text-green-300">
-                                        Jawaban Benar: <span className="font-bold">{String.fromCharCode(65 + (q.correctAnswer || 0))}</span>
-                                        {q.options?.[q.correctAnswer || 0] && ` - ${q.options[q.correctAnswer || 0]}`}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {wrongAnswers.length > 0 && (
+                          <div>
+                            <h4 className="text-lg font-bold text-red-400 mb-3 flex items-center gap-2">
+                              <span className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-sm">X</span>
+                              Jawaban Salah ({wrongAnswers.length})
+                            </h4>
+                            <div className="space-y-3">
+                              {wrongAnswers.map(q => {
+                                const qIndex = questions.findIndex(question => question.id === q.id);
+                                const studentAnswer = activeAnswers[q.id] as number;
+                                return (
+                                  <div key={q.id} className="bg-red-900/30 border border-red-700 p-4 rounded-lg">
+                                    <div className="flex items-start gap-3">
+                                      <span className="bg-red-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                        #{qIndex + 1}
+                                      </span>
+                                      <div className="flex-1">
+                                        <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
+                                        {q.image && <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />}
+                                        <div className="text-sm space-y-1">
+                                          <div className="text-red-300">
+                                            Jawaban Siswa: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
+                                            {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
+                                          </div>
+                                          <div className="text-green-300">
+                                            Jawaban Benar: <span className="font-bold">{String.fromCharCode(65 + (q.correctAnswer || 0))}</span>
+                                            {q.options?.[q.correctAnswer || 0] && ` - ${q.options[q.correctAnswer || 0]}`}
+                                          </div>
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
-                    {unanswered.length > 0 && (
-                      <div>
-                        <h4 className="text-lg font-bold text-gray-400 mb-3 flex items-center gap-2">
-                          <span className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-sm">-</span>
-                          Tidak Dijawab ({unanswered.length})
-                        </h4>
-                        <div className="space-y-3">
-                          {unanswered.map((q, idx) => {
-                            const qIndex = questions.findIndex(question => question.id === q.id);
-                            return (
-                              <div key={q.id} className="bg-gray-700/50 border border-gray-600 p-4 rounded-lg">
-                                <div className="flex items-start gap-3">
-                                  <span className="bg-gray-600 text-white text-sm font-bold px-2 py-1 rounded">
-                                    #{qIndex + 1}
-                                  </span>
-                                  <div className="flex-1">
-                                    <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
-                                    {q.image && (
-                                      <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />
-                                    )}
-                                    <div className="text-sm text-gray-400">
-                                      Jawaban Benar: <span className="font-bold text-green-400">{String.fromCharCode(65 + (q.correctAnswer || 0))}</span>
-                                      {q.options?.[q.correctAnswer || 0] && ` - ${q.options[q.correctAnswer || 0]}`}
+                        {unanswered.length > 0 && (
+                          <div>
+                            <h4 className="text-lg font-bold text-gray-400 mb-3 flex items-center gap-2">
+                              <span className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-sm">-</span>
+                              Tidak Dijawab ({unanswered.length})
+                            </h4>
+                            <div className="space-y-3">
+                              {unanswered.map(q => {
+                                const qIndex = questions.findIndex(question => question.id === q.id);
+                                return (
+                                  <div key={q.id} className="bg-gray-700/50 border border-gray-600 p-4 rounded-lg">
+                                    <div className="flex items-start gap-3">
+                                      <span className="bg-gray-600 text-white text-sm font-bold px-2 py-1 rounded">
+                                        #{qIndex + 1}
+                                      </span>
+                                      <div className="flex-1">
+                                        <p className="font-medium mb-2">{q.text || '(Soal bergambar)'}</p>
+                                        {q.image && <img src={q.image} alt="Soal" className="max-h-24 rounded mb-2" />}
+                                        <div className="text-sm text-gray-400">
+                                          Jawaban Benar: <span className="font-bold text-green-400">{String.fromCharCode(65 + (q.correctAnswer || 0))}</span>
+                                          {q.options?.[q.correctAnswer || 0] && ` - ${q.options[q.correctAnswer || 0]}`}
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
-                    {mcQuestions.length === 0 && (
-                      <div className="text-center text-gray-400 py-8">
-                        Tidak ada soal pilihan ganda dalam ujian ini.
-                      </div>
+                        {mcQuestions.length === 0 && (
+                          <div className="text-center text-gray-400 py-8">
+                            Tidak ada soal pilihan ganda dalam ujian ini.
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 );
@@ -795,7 +972,10 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
 
             <div className="p-4 border-t border-gray-700 flex justify-end">
               <button
-                onClick={() => setHistorySession(null)}
+                onClick={() => {
+                  setHistorySession(null);
+                  setIsEditingAnswers(false);
+                }}
                 className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg"
               >
                 Tutup
@@ -1009,7 +1189,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                   </td>
                   <td className="p-4">
                     <button
-                      onClick={() => setHistorySession(session)}
+                      onClick={() => handleOpenHistory(session)}
                       disabled={questions.filter(q => q.type === 'mc').length === 0}
                       className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold py-1 px-2 rounded disabled:bg-gray-500 disabled:cursor-not-allowed"
                     >
