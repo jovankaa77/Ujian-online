@@ -68,6 +68,8 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const [finalScore, setFinalScore] = useState<number | null>(null);
   const [violationReason, setViolationReason] = useState('');
   const [liveCodeDrafts, setLiveCodeDrafts] = useState<{ [key: string]: string }>({});
+  const answersRef = useRef<{ [key: string]: any }>({});
+  const liveCodeDraftsRef = useRef<{ [key: string]: string }>({});
   const [codeMessages, setCodeMessages] = useState<{ [key: string]: { text: string; type: 'success' | 'error' | 'warning' } }>({});
   const [showCancelConfirm, setShowCancelConfirm] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -1229,12 +1231,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   };
 
   const handleAnswerChange = (questionId: string, answer: any) => {
-    const newAnswers = { ...answers, [questionId]: answer };
+    const newAnswers = { ...answersRef.current, [questionId]: answer };
+    answersRef.current = newAnswers;
     setAnswers(newAnswers);
     updateDoc(sessionDocRef, { answers: newAnswers });
   };
 
   const handleLiveCodeDraftChange = (questionId: string, code: string) => {
+    liveCodeDraftsRef.current = { ...liveCodeDraftsRef.current, [questionId]: code };
     setLiveCodeDrafts(prev => ({ ...prev, [questionId]: code }));
   };
 
@@ -1301,9 +1305,25 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   
   const finishExam = async (reason = "Selesai") => {
     if (isFinished) return;
-    
+
     console.log("Finishing exam with reason:", reason);
-    
+
+    const currentAnswers = { ...answersRef.current };
+    const currentDrafts = { ...liveCodeDraftsRef.current };
+
+    questions.forEach(q => {
+      if (q.type === 'livecode') {
+        const draft = currentDrafts[q.id];
+        const saved = currentAnswers[q.id];
+        if (draft && draft.trim() && draft !== (saved || '')) {
+          currentAnswers[q.id] = draft;
+          answersRef.current[q.id] = draft;
+        }
+      }
+    });
+
+    setAnswers(currentAnswers);
+
     // Capture final attendance photo before finishing
     const finalLabel = "Selesai";
     await captureAttendancePhoto(finalLabel);
@@ -1312,12 +1332,12 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     setIsFinished(true);
     setShowConfirmModal(false);
     setShowUnansweredModal(false);
-    
+
     // Clear attendance photo timer
     if (attendanceIntervalRef.current) {
       clearInterval(attendanceIntervalRef.current);
     }
-    
+
     // Exit fullscreen when exam is finished
     if (isInFullscreen()) {
       try {
@@ -1334,33 +1354,33 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         console.error("Failed to exit fullscreen:", error);
       }
     }
-    
+
     let score = 0;
     let status = 'finished';
-    
+
     if (reason.startsWith("Diskualifikasi")) {
       score = 0;
       status = 'disqualified';
     } else {
       const mcQuestions = questions.filter(q => q.type === 'mc');
       mcQuestions.forEach(q => {
-        if (q.correctAnswer === answers[q.id]) {
+        if (q.correctAnswer === currentAnswers[q.id]) {
           score++;
         }
       });
       score = mcQuestions.length > 0 ? (score / mcQuestions.length) * 100 : 0;
     }
-    
+
     setFinalScore(score);
     console.log("Final score calculated:", score);
-    
-    await updateDoc(sessionDocRef, { 
-      status, 
-      finishTime: new Date(), 
-      finalScore: score, 
-      answers 
+
+    await updateDoc(sessionDocRef, {
+      status,
+      finishTime: new Date(),
+      finalScore: score,
+      answers: currentAnswers
     });
-    
+
     console.log("Exam finished successfully");
   };
 
