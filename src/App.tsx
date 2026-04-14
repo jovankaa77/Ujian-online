@@ -25,7 +25,7 @@ function App() {
   useEffect(() => {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                      (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
-                     window.screen.width < 1024;
+                     window.screen.width < 768;
     
     if (isMobile) {
       document.body.innerHTML = `
@@ -45,7 +45,7 @@ function App() {
             <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">Platform ujian ini hanya dapat diakses dari:</p>
             <ul style="list-style: none; padding: 0; font-size: 1.1rem;">
               <li>💻 Laptop atau Desktop</li>
-              <li>🖥️ Layar minimal 1024px</li>
+              <li>🖥️ Layar minimal 768px</li>
               <li>🌐 Browser Desktop</li>
             </ul>
             <p style="margin-top: 1rem; color: #fbbf24;">Silakan gunakan perangkat yang sesuai untuk mengikuti ujian.</p>

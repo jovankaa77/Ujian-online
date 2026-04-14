@@ -48,7 +48,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
   useEffect(() => {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                      (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
-                     window.screen.width < 1024;
+                     window.screen.width < 768;
 
     setChecks(c => ({ ...c, device: !isMobile }));
     checkExtensions();
@@ -179,7 +179,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
 
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                          (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
-                         window.screen.width < 1024;
+                         window.screen.width < 768;
 
         setChecks(prevChecks => ({
           ...prevChecks,
@@ -499,7 +499,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
       setTimeout(() => {
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                          (navigator.maxTouchPoints && navigator.maxTouchPoints > 2) ||
-                         window.screen.width < 1024;
+                         window.screen.width < 768;
 
         setChecks(c => ({ ...c, device: !isMobile }));
         checkExtensions();
@@ -659,7 +659,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
 
         {checks.device === false && (
           <p className="text-red-400 text-center mb-4">
-            Ujian hanya bisa diakses dari Laptop/Desktop dengan layar minimal 1024px.
+            Ujian hanya bisa diakses dari Laptop/Desktop dengan layar minimal 768px.
           </p>
         )}
 
