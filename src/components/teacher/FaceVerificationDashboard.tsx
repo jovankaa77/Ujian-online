@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 interface FaceVerificationDashboardProps {
@@ -60,6 +60,8 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'violations' | 'baselines'>('violations');
   const [selectedPhoto, setSelectedPhoto] = useState<SelectedPhoto | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'violation'; logId: string } | { type: 'baseline'; sessionId: string; studentName: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     loadLogs();
@@ -128,6 +130,33 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
       setBaselinePhotos(photos);
     } catch (error) {
       console.error('Error loading baseline photos:', error);
+    }
+  };
+
+  const handleDeleteViolation = async (logId: string) => {
+    setIsDeleting(true);
+    try {
+      await deleteDoc(doc(db, `artifacts/${appId}/public/data/face_verification_logs`, logId));
+      setLogs(prev => prev.filter(l => l.id !== logId));
+    } catch (error) {
+      console.error('Error deleting violation log:', error);
+    } finally {
+      setIsDeleting(false);
+      setConfirmDelete(null);
+    }
+  };
+
+  const handleDeleteBaseline = async (sessionId: string) => {
+    setIsDeleting(true);
+    try {
+      const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, sessionId);
+      await updateDoc(sessionDocRef, { faceBaselineUrl: '', faceDescriptor: [] });
+      setBaselinePhotos(prev => prev.filter(p => p.id !== sessionId));
+    } catch (error) {
+      console.error('Error deleting baseline photo:', error);
+    } finally {
+      setIsDeleting(false);
+      setConfirmDelete(null);
     }
   };
 
@@ -297,6 +326,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
                   student={student}
                   formatTimestamp={formatTimestamp}
                   onPhotoClick={(photo) => setSelectedPhoto(photo)}
+                  onDeleteViolation={(logId) => setConfirmDelete({ type: 'violation', logId })}
                 />
               ))}
             </div>
@@ -346,7 +376,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
                   key={photo.id}
                   className="bg-gray-800 rounded-lg overflow-hidden shadow-lg border border-gray-700 hover:border-teal-500 transition-colors"
                 >
-                  <div className="aspect-square bg-gray-900 overflow-hidden">
+                  <div className="aspect-square bg-gray-900 overflow-hidden relative">
                     <img
                       src={photo.faceBaselineUrl}
                       alt={photo.fullName}
@@ -361,6 +391,18 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
                         })
                       }
                     />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDelete({ type: 'baseline', sessionId: photo.id, studentName: photo.fullName });
+                      }}
+                      className="absolute top-1.5 right-1.5 w-7 h-7 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-colors"
+                      title="Hapus foto verifikasi"
+                    >
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
                   <div className="p-3">
                     <h4 className="font-bold text-white text-sm truncate">
@@ -385,6 +427,58 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
       {selectedPhoto && (
         <PhotoModal photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} />
       )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-900/60 rounded-full flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Konfirmasi Hapus</h3>
+                <p className="text-sm text-gray-400">
+                  {confirmDelete.type === 'violation'
+                    ? 'Hapus log pelanggaran ini?'
+                    : `Hapus foto verifikasi ${confirmDelete.studentName}?`}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-400 mb-5 bg-gray-700/50 rounded-lg p-3">
+              {confirmDelete.type === 'violation'
+                ? 'Data pelanggaran ini akan dihapus permanen dan tidak dapat dikembalikan.'
+                : 'Foto verifikasi wajah siswa ini akan dihapus. Siswa perlu melakukan verifikasi ulang saat ujian berikutnya.'}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                disabled={isDeleting}
+                className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-60"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => {
+                  if (confirmDelete.type === 'violation') {
+                    handleDeleteViolation(confirmDelete.logId);
+                  } else {
+                    handleDeleteBaseline(confirmDelete.sessionId);
+                  }
+                }}
+                disabled={isDeleting}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-60 flex items-center gap-2"
+              >
+                {isDeleting && (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                )}
+                {isDeleting ? 'Menghapus...' : 'Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -393,7 +487,8 @@ const StudentViolationCard: React.FC<{
   student: GroupedStudent;
   formatTimestamp: (ts: any) => string;
   onPhotoClick: (photo: SelectedPhoto) => void;
-}> = ({ student, formatTimestamp, onPhotoClick }) => {
+  onDeleteViolation: (logId: string) => void;
+}> = ({ student, formatTimestamp, onPhotoClick, onDeleteViolation }) => {
   const doubleCount = student.violations.filter((v) => v.violationType === 'Wajah Ganda').length;
   const unrecognizedCount = student.violations.filter((v) => v.violationType === 'Wajah Tidak Dikenali').length;
 
@@ -458,20 +553,19 @@ const StudentViolationCard: React.FC<{
           </p>
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
             {student.violations.map((v) => (
-              <div
-                key={v.id}
-                className="flex-shrink-0 w-32 cursor-pointer group"
-                onClick={() =>
-                  onPhotoClick({
-                    evidenceUrl: v.evidencePhotoUrl,
-                    baselineUrl: v.baselinePhotoUrl || student.baselinePhotoUrl,
-                    violationType: v.violationType,
-                    timestamp: formatTimestamp(v.timestamp),
-                    studentName: student.fullName,
-                  })
-                }
-              >
-                <div className="w-32 h-32 rounded-lg overflow-hidden bg-gray-900 border border-gray-600 group-hover:border-teal-500 transition-colors relative">
+              <div key={v.id} className="flex-shrink-0 w-32 group">
+                <div
+                  className="w-32 h-32 rounded-lg overflow-hidden bg-gray-900 border border-gray-600 group-hover:border-teal-500 transition-colors relative cursor-pointer"
+                  onClick={() =>
+                    onPhotoClick({
+                      evidenceUrl: v.evidencePhotoUrl,
+                      baselineUrl: v.baselinePhotoUrl || student.baselinePhotoUrl,
+                      violationType: v.violationType,
+                      timestamp: formatTimestamp(v.timestamp),
+                      studentName: student.fullName,
+                    })
+                  }
+                >
                   {v.evidencePhotoUrl ? (
                     <img
                       src={v.evidencePhotoUrl}
@@ -505,6 +599,18 @@ const StudentViolationCard: React.FC<{
                       />
                     </svg>
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteViolation(v.id);
+                    }}
+                    className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Hapus pelanggaran ini"
+                  >
+                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
                 <div className="mt-1.5">
                   <span
