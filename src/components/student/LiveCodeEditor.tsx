@@ -5,13 +5,15 @@ const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
   python: 'Pemograman Python',
   php: 'Pemograman PHP',
+  cpp: 'C++',
   htmlcss: 'HTML, CSS Dan Javascript'
 };
 
 const CODE_TEMPLATES: Record<string, string> = {
   javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`,
   python: `# Python Hello World\nprint("Hello, World!")`,
-  php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`
+  php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`,
+  cpp: `#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`
 };
 
 const WEB_DEFAULT_HTML = `<!DOCTYPE html>
@@ -52,12 +54,14 @@ const MONACO_LANGUAGE_MAP: Record<string, string> = {
   javascript: 'javascript',
   python: 'python',
   php: 'php',
+  cpp: 'cpp',
   htmlcss: 'html'
 };
 
 const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
   python: { language: 'python', version: '3.10.0' },
-  php: { language: 'php', version: '8.2.3' }
+  php: { language: 'php', version: '8.2.3' },
+  cpp: { language: 'c++', version: '10.2.0' }
 };
 
 const WEB_SEPARATOR = '\n<!--__WEB_TAB_SEPARATOR__-->\n';
@@ -752,7 +756,7 @@ export default function LiveCodeEditor({
               Client-side
             </span>
           )}
-          {(language === 'python' || language === 'php') && (
+          {(language === 'python' || language === 'php' || language === 'cpp') && (
             <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded">
               Server-side
             </span>

@@ -7,12 +7,14 @@ const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
   python: 'Python',
   php: 'PHP',
+  cpp: 'C++',
   htmlcss: 'HTML, CSS Dan Javascript'
 };
 
 const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
   python: { language: 'python', version: '3.10.0' },
-  php: { language: 'php', version: '8.2.3' }
+  php: { language: 'php', version: '8.2.3' },
+  cpp: { language: 'c++', version: '10.2.0' }
 };
 
 interface Question {
@@ -600,22 +602,23 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                       <p className="text-sm text-gray-400 mb-2">Kode Siswa:</p>
                       {session.answers[q.id] ? (
                         <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
-                          <div className="flex">
-                            <div className="bg-slate-800 text-gray-500 text-right pr-3 py-4 select-none font-mono text-sm border-r border-gray-600" style={{ lineHeight: '1.5', minWidth: '3rem' }}>
-                              {session.answers[q.id].split('\n').map((_: string, i: number) => (
-                                <div key={i} className="px-2">{i + 1}</div>
-                              ))}
-                            </div>
-                            <pre
-                              className="flex-1 p-4 text-sm font-mono overflow-x-auto whitespace-pre-wrap text-gray-200"
-                              style={{
-                                lineHeight: '1.5',
-                                background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
-                              }}
-                            >
-                              {session.answers[q.id]}
-                            </pre>
-                          </div>
+                          <Editor
+                            height="300px"
+                            language={q.language === 'cpp' ? 'cpp' : q.language === 'python' ? 'python' : q.language === 'php' ? 'php' : 'javascript'}
+                            value={session.answers[q.id] || ''}
+                            theme="vs-dark"
+                            options={{
+                              readOnly: true,
+                              minimap: { enabled: false },
+                              fontSize: 13,
+                              lineNumbers: 'on',
+                              scrollBeyondLastLine: false,
+                              wordWrap: 'on',
+                              padding: { top: 8 },
+                              contextmenu: false,
+                              folding: true,
+                            }}
+                          />
                         </div>
                       ) : (
                         <p className="p-4 bg-gray-900 rounded-md text-gray-500">(Tidak dijawab)</p>

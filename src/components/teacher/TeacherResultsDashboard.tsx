@@ -9,6 +9,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
   python: 'Python',
   php: 'PHP',
+  cpp: 'C++',
   htmlcss: 'HTML, CSS Dan Javascript'
 };
 
