@@ -469,10 +469,6 @@ interface LiveCodeEditorProps {
   codeMessage: { text: string; type: 'success' | 'error' | 'warning' } | undefined;
 }
 
-type TerminalLine =
-  | { kind: 'output'; text: string; error?: boolean }
-  | { kind: 'input'; prompt: string; value: string; done: boolean };
-
 function codeNeedsStdin(code: string, lang: string): boolean {
   if (lang === 'cpp') {
     return /cin\s*>>/.test(code) || /scanf\s*\(/.test(code) ||
@@ -485,6 +481,50 @@ function codeNeedsStdin(code: string, lang: string): boolean {
     return /\bfgets\s*\(\s*STDIN\b/.test(code) || /\breadline\s*\(/.test(code);
   }
   return false;
+}
+
+function formatOutputWithStdin(stdout: string, stdinVal: string): string {
+  if (!stdinVal.trim()) return stdout;
+  const inputs = stdinVal.split('\n');
+  if (inputs.length === 0) return stdout;
+
+  // Strategy: find lines/segments that end with ": " or ":" and are followed by
+  // the next prompt or end of output — these are where cin reads.
+  // We split stdout into lines and try to interleave.
+  const lines = stdout.split('\n');
+  const result: string[] = [];
+  let inputIdx = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Check if this line contains segments that are prompts (text before cin)
+    // A prompt typically ends with ": " or ":" or "? " right before cin reads
+    // Piston concatenates all cout output since cin doesn't add newlines
+    // e.g. "Type a number: Type another number: Sum is: 15"
+    // We need to split at points where an input was consumed.
+
+    // Count how many prompt-like segments are in a single line
+    // This handles the case where all cout statements are on one line
+    const parts = line.split(/(?<=:\s*)/);
+
+    if (parts.length > 1 && inputIdx < inputs.length) {
+      let rebuilt = '';
+      for (let p = 0; p < parts.length; p++) {
+        rebuilt += parts[p];
+        // After a prompt-like segment that ends with ": ", inject user input
+        // but only if there's more content after (meaning next segment is another prompt or result)
+        if (inputIdx < inputs.length && /:\s*$/.test(parts[p]) && p < parts.length - 1) {
+          rebuilt += inputs[inputIdx] + '\n';
+          inputIdx++;
+        }
+      }
+      result.push(rebuilt);
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
 }
 
 export default function LiveCodeEditor({
@@ -505,16 +545,7 @@ export default function LiveCodeEditor({
   const [isRunning, setIsRunning] = useState(false);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
-
-  // Interactive terminal state
-  const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
-  const [terminalInputValue, setTerminalInputValue] = useState('');
-  const [terminalActive, setTerminalActive] = useState(false);
-  const [collectedInputs, setCollectedInputs] = useState<string[]>([]);
-  const [pendingCode, setPendingCode] = useState('');
-  const [waitingExecution, setWaitingExecution] = useState(false);
-  const terminalInputRef = useRef<HTMLInputElement>(null);
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const [stdinValue, setStdinValue] = useState('');
 
   const isWebMode = language === 'htmlcss';
   const isJavaScript = language === 'javascript';
@@ -565,143 +596,6 @@ export default function LiveCodeEditor({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [terminalLines]);
-
-  useEffect(() => {
-    if (terminalActive) {
-      setTimeout(() => terminalInputRef.current?.focus(), 50);
-    }
-  }, [terminalActive, terminalLines.length]);
-
-  const executeCodeWithStdin = useCallback(async (code: string, stdin: string) => {
-    const pistonConfig = PISTON_CONFIG[language];
-    if (!pistonConfig) {
-      setTerminalLines(prev => [...prev, { kind: 'output', text: 'Error: Bahasa tidak didukung.', error: true }]);
-      setTerminalActive(false);
-      setWaitingExecution(false);
-      setIsRunning(false);
-      return;
-    }
-
-    setWaitingExecution(true);
-    setIsRunning(true);
-
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-        body: JSON.stringify({
-          language: pistonConfig.language,
-          version: pistonConfig.version,
-          files: [{ content: code }],
-          stdin,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        setTerminalLines(prev => [
-          ...prev,
-          { kind: 'output', text: `\nError: Server returned status ${response.status}`, error: true },
-        ]);
-        setIsRunning(false);
-        setTerminalActive(false);
-        setWaitingExecution(false);
-        return;
-      }
-
-      const data = await response.json();
-
-      if (data.compile?.stderr?.trim()) {
-        setTerminalLines(prev => [
-          ...prev,
-          { kind: 'output', text: '\nCompilation Error:\n' + data.compile.stderr, error: true },
-        ]);
-        setIsRunning(false);
-        setTerminalActive(false);
-        setWaitingExecution(false);
-        return;
-      }
-
-      if (data.run?.signal === 'SIGKILL') {
-        setTerminalLines(prev => [
-          ...prev,
-          { kind: 'output', text: '\nError: Program dihentikan (timeout/memory). Kemungkinan infinite loop.', error: true },
-        ]);
-        setIsRunning(false);
-        setTerminalActive(false);
-        setWaitingExecution(false);
-        return;
-      }
-
-      const stdout = (data.run?.stdout || '').trimEnd();
-      const stderr = (data.run?.stderr || '').trimEnd();
-
-      if (stdout) {
-        setTerminalLines(prev => [...prev, { kind: 'output', text: '\n' + stdout, error: false }]);
-      }
-      if (stderr) {
-        setTerminalLines(prev => [...prev, { kind: 'output', text: '\n' + stderr, error: true }]);
-      }
-      if (!stdout && !stderr) {
-        setTerminalLines(prev => [...prev, { kind: 'output', text: '\n(Eksekusi berhasil tanpa output)', error: false }]);
-      }
-    } catch (err: any) {
-      const msg = err.name === 'AbortError'
-        ? 'Error: Timeout (20 detik). Kemungkinan infinite loop.'
-        : 'Error: ' + (err.message || 'Koneksi gagal.');
-      setTerminalLines(prev => [...prev, { kind: 'output', text: '\n' + msg, error: true }]);
-    }
-
-    setIsRunning(false);
-    setTerminalActive(false);
-    setWaitingExecution(false);
-  }, [language]);
-
-  const handleTerminalSubmitInputs = useCallback(() => {
-    const stdin = collectedInputs.join('\n');
-    setTerminalLines(prev => [...prev, { kind: 'output', text: '\nMenjalankan program...', error: false }]);
-    setTerminalActive(false);
-    executeCodeWithStdin(pendingCode, stdin);
-  }, [collectedInputs, pendingCode, executeCodeWithStdin]);
-
-  const handleTerminalKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-
-    const val = terminalInputValue;
-    const newInputs = [...collectedInputs, val];
-
-    // Mark current input line as done
-    setTerminalLines(prev => {
-      const updated = [...prev];
-      for (let i = updated.length - 1; i >= 0; i--) {
-        const line = updated[i];
-        if (line.kind === 'input' && !line.done) {
-          updated[i] = { ...line, value: val, done: true };
-          break;
-        }
-      }
-      return updated;
-    });
-    setTerminalInputValue('');
-    setCollectedInputs(newInputs);
-
-    // Always show next input prompt — user will click "Jalankan" when done
-    setTerminalLines(prev => [
-      ...prev,
-      { kind: 'input', prompt: `>> `, value: '', done: false },
-    ]);
-  }, [terminalInputValue, collectedInputs]);
 
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
@@ -767,35 +661,21 @@ export default function LiveCodeEditor({
       return;
     }
 
-    // Detect if code needs stdin (cin, scanf, etc.)
-    const needsStdin = codeNeedsStdin(code, language);
-
-    if (needsStdin) {
-      // Launch interactive terminal for user to type inputs
-      setPendingCode(code);
-      setCollectedInputs([]);
-      setTerminalInputValue('');
-      setTerminalLines([
-        { kind: 'output', text: 'Program memerlukan input. Ketik nilai lalu tekan Enter.\nSetelah semua input dimasukkan, klik tombol "Jalankan Program".', error: false },
-        { kind: 'input', prompt: '>> ', value: '', done: false },
-      ]);
-      setTerminalActive(true);
-      setWaitingExecution(false);
-      setIsRunning(false);
-      return;
-    }
-
-    // No stdin — execute directly
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
 
       const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-        body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }] }),
+        body: JSON.stringify({
+          language: pistonConfig.language,
+          version: pistonConfig.version,
+          files: [{ content: code }],
+          stdin: stdinValue,
+        }),
         signal: controller.signal,
       });
 
@@ -825,19 +705,20 @@ export default function LiveCodeEditor({
       }
       const hasStderr = data.run?.stderr?.trim();
       const hasStdout = data.run?.stdout?.trim();
+      const formattedStdout = hasStdout ? formatOutputWithStdin(String(data.run.stdout), stdinValue) : '';
       if (hasStderr && hasStdout) {
-        setCodeOutput({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
+        setCodeOutput({ output: formattedStdout + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
       } else if (hasStderr) {
         setCodeOutput({ output: 'Error:\n' + String(data.run.stderr), error: true });
-      } else if (hasStdout) {
-        setCodeOutput({ output: String(data.run.stdout), error: false });
+      } else if (formattedStdout.trim()) {
+        setCodeOutput({ output: formattedStdout, error: false });
       } else {
         setCodeOutput({ output: '(Eksekusi berhasil tanpa output)', error: false });
       }
       setIsRunning(false);
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        setCodeOutput({ output: 'Error: Timeout 15 detik. Kemungkinan infinite loop.', error: true });
+        setCodeOutput({ output: 'Error: Timeout 20 detik. Kemungkinan infinite loop.', error: true });
       } else if (err.name === 'TypeError') {
         setCodeOutput({ output: 'Error: Tidak dapat terhubung ke server.', error: true });
       } else {
@@ -845,7 +726,7 @@ export default function LiveCodeEditor({
       }
       setIsRunning(false);
     }
-  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language]);
+  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language, stdinValue]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
   const showPreviewPanel = isWebMode && htmlPreview;
@@ -1042,125 +923,35 @@ export default function LiveCodeEditor({
         </div>
       )}
 
-      {/* Interactive Terminal (for stdin languages) */}
-      {terminalLines.length > 0 && !isWebMode && (
-        <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
-          <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
+      {/* Stdin input panel - shown when code needs input (cin, scanf, input(), etc.) */}
+      {!isWebMode && !isJavaScript && codeNeedsStdin(currentDraft !== undefined ? currentDraft : (savedAnswer || ''), language) && (
+        <div className="rounded-lg overflow-hidden border border-gray-600">
+          <div className="flex items-center justify-between bg-gray-800 px-3 py-2 border-b border-gray-600">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${waitingExecution ? 'bg-blue-400 animate-pulse' : terminalActive ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
-              <span className="text-sm font-mono text-gray-200 font-semibold">Terminal</span>
-              {waitingExecution && (
-                <span className="text-xs text-blue-300 bg-blue-900/40 px-2 py-0.5 rounded">
-                  Mengeksekusi...
-                </span>
-              )}
-              {terminalActive && !waitingExecution && (
-                <span className="text-xs text-yellow-300 bg-yellow-900/40 px-2 py-0.5 rounded">
-                  Masukkan input
-                </span>
-              )}
+              <span className="text-sm font-mono text-cyan-300 font-semibold">Input (stdin)</span>
+              <span className="text-xs text-gray-400">Masukkan nilai, pisahkan tiap input dengan Enter</span>
             </div>
-            <button
-              onClick={() => { setTerminalLines([]); setTerminalActive(false); setIsRunning(false); setWaitingExecution(false); }}
-              className="text-gray-400 hover:text-white text-xs transition-colors"
-            >
-              Tutup
-            </button>
           </div>
-          <div
-            className="bg-gray-950 p-4 min-h-[120px] max-h-[400px] overflow-auto font-mono text-sm"
-            onClick={() => terminalActive && terminalInputRef.current?.focus()}
-          >
-            {terminalLines.map((line, idx) => {
-              if (line.kind === 'output') {
-                return (
-                  <div
-                    key={idx}
-                    className={line.error ? 'text-red-400' : 'text-gray-200'}
-                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                  >
-                    {line.text}
-                  </div>
-                );
-              }
-              return (
-                <div key={idx} className="flex items-center gap-1 mt-1">
-                  <span className="text-cyan-400 select-none">{line.prompt}</span>
-                  {line.done ? (
-                    <span className="text-white">{line.value}</span>
-                  ) : (
-                    <input
-                      ref={terminalInputRef}
-                      type="text"
-                      value={terminalInputValue}
-                      onChange={e => setTerminalInputValue(e.target.value)}
-                      onKeyDown={handleTerminalKeyDown}
-                      className="flex-1 bg-transparent text-white outline-none caret-white border-b border-cyan-500 focus:border-cyan-300 transition-colors"
-                      style={{ minWidth: 0 }}
-                      autoFocus
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      spellCheck={false}
-                    />
-                  )}
-                </div>
-              );
-            })}
-            <div ref={terminalEndRef} />
-          </div>
-
-          {/* Action buttons at the bottom of terminal */}
-          <div className="flex items-center gap-2 px-4 py-3 bg-gray-800 border-t border-gray-600">
-            {terminalActive && !waitingExecution && (
-              <>
-                <button
-                  onClick={handleTerminalSubmitInputs}
-                  disabled={collectedInputs.length === 0}
-                  className={`text-sm font-bold py-1.5 px-4 rounded transition-colors ${
-                    collectedInputs.length > 0
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  Jalankan Program ({collectedInputs.length} input)
-                </button>
-                <span className="text-xs text-gray-500">
-                  Ketik input lalu Enter. Klik "Jalankan" jika sudah selesai.
-                </span>
-              </>
-            )}
-            {!terminalActive && !waitingExecution && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setTerminalLines([]);
-                    setTerminalActive(false);
-                    setCollectedInputs([]);
-                  }}
-                  className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 py-1.5 px-3 rounded transition-colors"
-                >
-                  Bersihkan
-                </button>
-                <button
-                  onClick={() => runCode()}
-                  className="text-xs bg-blue-600 hover:bg-blue-700 text-white py-1.5 px-3 rounded transition-colors"
-                >
-                  Jalankan Ulang
-                </button>
-              </div>
-            )}
+          <div className="bg-gray-950">
+            <textarea
+              value={stdinValue}
+              onChange={e => setStdinValue(e.target.value)}
+              placeholder={"Contoh:\n5\n10"}
+              rows={3}
+              className="w-full px-4 py-3 bg-transparent text-white font-mono text-sm resize-y outline-none placeholder-gray-600"
+              spellCheck={false}
+            />
           </div>
         </div>
       )}
 
-      {/* Static output terminal (no stdin / JS) */}
-      {codeOutput && !isWebMode && terminalLines.length === 0 && (
+      {/* Terminal Output */}
+      {codeOutput && !isWebMode && (
         <div className="rounded-lg overflow-hidden border border-gray-600">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
             <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-yellow-400 animate-pulse' : codeOutput.error ? 'bg-red-400' : 'bg-green-400'}`} />
-              <span className="text-sm font-mono text-gray-300">Terminal Output</span>
+              <span className="text-sm font-mono text-gray-300">Output</span>
             </div>
             <button
               onClick={() => setCodeOutput(null)}
