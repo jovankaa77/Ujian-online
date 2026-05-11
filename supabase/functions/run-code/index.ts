@@ -18,7 +18,8 @@ const JUDGE0_LANGUAGE_IDS: Record<string, number> = {
 async function executeWithPiston(
   language: string,
   version: string,
-  sourceCode: string
+  sourceCode: string,
+  stdin: string = ""
 ): Promise<{
   success: boolean;
   result?: Record<string, unknown>;
@@ -35,6 +36,7 @@ async function executeWithPiston(
         language,
         version,
         files: [{ content: sourceCode }],
+        stdin: stdin || "",
       }),
       signal: controller.signal,
     });
@@ -256,7 +258,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json();
-    const { language, version, files } = body;
+    const { language, version, files, stdin } = body;
 
     if (!language || !files || !Array.isArray(files) || files.length === 0) {
       return new Response(
@@ -269,11 +271,13 @@ Deno.serve(async (req: Request) => {
     }
 
     const sourceCode = files[0]?.content || "";
+    const stdinValue: string = typeof stdin === "string" ? stdin : "";
 
     const pistonResult = await executeWithPiston(
       language,
       version || "3.10.0",
-      sourceCode
+      sourceCode,
+      stdinValue
     );
 
     if (pistonResult.success && pistonResult.result) {
@@ -286,7 +290,7 @@ Deno.serve(async (req: Request) => {
     const judge0Result = await executeWithJudge0(
       language,
       sourceCode,
-      ""
+      stdinValue
     );
 
     if (judge0Result.success && judge0Result.result) {
