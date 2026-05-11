@@ -469,6 +469,28 @@ interface LiveCodeEditorProps {
   codeMessage: { text: string; type: 'success' | 'error' | 'warning' } | undefined;
 }
 
+type TerminalLine =
+  | { kind: 'output'; text: string; error?: boolean }
+  | { kind: 'input'; prompt: string; value: string; done: boolean };
+
+function detectStdinCount(code: string, lang: string): number {
+  if (lang === 'cpp') {
+    const cinMatches = (code.match(/cin\s*>>/g) || []).length;
+    const scanfMatches = (code.match(/scanf\s*\(/g) || []).length;
+    const getsMatches = (code.match(/\bgets\s*\(/g) || []).length;
+    const getlineMatches = (code.match(/getline\s*\(/g) || []).length;
+    return cinMatches + scanfMatches + getsMatches + getlineMatches;
+  }
+  if (lang === 'python') {
+    return (code.match(/\binput\s*\(/g) || []).length;
+  }
+  if (lang === 'php') {
+    return (code.match(/\bfgets\s*\(\s*STDIN\b/g) || []).length +
+           (code.match(/\breadline\s*\(/g) || []).length;
+  }
+  return 0;
+}
+
 export default function LiveCodeEditor({
   questionId,
   language,
@@ -487,6 +509,16 @@ export default function LiveCodeEditor({
   const [isRunning, setIsRunning] = useState(false);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+
+  // Interactive terminal state
+  const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
+  const [terminalInputValue, setTerminalInputValue] = useState('');
+  const [terminalActive, setTerminalActive] = useState(false);
+  const [collectedInputs, setCollectedInputs] = useState<string[]>([]);
+  const [pendingStdinCount, setPendingStdinCount] = useState(0);
+  const [pendingCode, setPendingCode] = useState('');
+  const terminalInputRef = useRef<HTMLInputElement>(null);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
 
   const isWebMode = language === 'htmlcss';
   const isJavaScript = language === 'javascript';
@@ -537,6 +569,134 @@ export default function LiveCodeEditor({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  useEffect(() => {
+    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [terminalLines]);
+
+  useEffect(() => {
+    if (terminalActive) {
+      setTimeout(() => terminalInputRef.current?.focus(), 50);
+    }
+  }, [terminalActive, terminalLines.length]);
+
+  const executeCodeWithStdin = useCallback(async (code: string, stdin: string) => {
+    const pistonConfig = PISTON_CONFIG[language];
+    if (!pistonConfig) {
+      setTerminalLines(prev => [...prev, { kind: 'output', text: 'Error: Bahasa tidak didukung.', error: true }]);
+      setTerminalActive(false);
+      setIsRunning(false);
+      return;
+    }
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+        body: JSON.stringify({
+          language: pistonConfig.language,
+          version: pistonConfig.version,
+          files: [{ content: code }],
+          stdin,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      const data = await response.json();
+
+      if (data.compile?.stderr?.trim()) {
+        setTerminalLines(prev => [
+          ...prev,
+          { kind: 'output', text: '\nCompilation Error:\n' + data.compile.stderr, error: true },
+        ]);
+        setIsRunning(false);
+        setTerminalActive(false);
+        return;
+      }
+
+      if (data.run?.signal === 'SIGKILL') {
+        setTerminalLines(prev => [
+          ...prev,
+          { kind: 'output', text: '\nError: Program dihentikan (timeout/memory limit). Kemungkinan infinite loop.', error: true },
+        ]);
+        setIsRunning(false);
+        setTerminalActive(false);
+        return;
+      }
+
+      const stdout = data.run?.stdout || '';
+      const stderr = data.run?.stderr || '';
+
+      // Strip the stdin echo lines from stdout (piston echoes stdin back in some configs)
+      // Parse interleaved output: we show full stdout as final output after prompt lines
+      const outputText = stdout + (stderr.trim() ? '\n' + stderr : '');
+
+      // Build final interleaved display: re-parse stdout removing echoed inputs,
+      // then display remaining output lines.
+      const inputLines = stdin ? stdin.split('\n') : [];
+      let remaining = stdout;
+      // Remove echoed input values from stdout if piston echoes them
+      inputLines.forEach(inp => {
+        remaining = remaining.replace(inp + '\n', '').replace(inp, '');
+      });
+
+      setTerminalLines(prev => [
+        ...prev,
+        { kind: 'output', text: remaining || (stderr.trim() ? '' : '(Eksekusi berhasil tanpa output)'), error: false },
+        ...(stderr.trim() ? [{ kind: 'output' as const, text: stderr, error: true }] : []),
+      ]);
+    } catch (err: any) {
+      const msg = err.name === 'AbortError'
+        ? 'Error: Timeout. Kemungkinan infinite loop.'
+        : 'Error: ' + (err.message || 'Koneksi gagal.');
+      setTerminalLines(prev => [...prev, { kind: 'output', text: msg, error: true }]);
+    }
+
+    setIsRunning(false);
+    setTerminalActive(false);
+  }, [language]);
+
+  const handleTerminalKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+
+    const val = terminalInputValue;
+    const newInputs = [...collectedInputs, val];
+
+    setTerminalLines(prev => {
+      // Mark last input line as done with the typed value
+      const updated = [...prev];
+      for (let i = updated.length - 1; i >= 0; i--) {
+        if (updated[i].kind === 'input' && !updated[i].done) {
+          updated[i] = { ...updated[i], value: val, done: true };
+          break;
+        }
+      }
+      return updated;
+    });
+    setTerminalInputValue('');
+    setCollectedInputs(newInputs);
+
+    if (newInputs.length >= pendingStdinCount) {
+      // All inputs collected — execute now
+      const stdin = newInputs.join('\n');
+      setTerminalLines(prev => [...prev, { kind: 'output', text: '\nMenjalankan...', error: false }]);
+      executeCodeWithStdin(pendingCode, stdin);
+    } else {
+      // More inputs needed
+      setTerminalLines(prev => [
+        ...prev,
+        { kind: 'input', prompt: `Input ${newInputs.length + 1}: `, value: '', done: false },
+      ]);
+    }
+  }, [terminalInputValue, collectedInputs, pendingStdinCount, pendingCode, executeCodeWithStdin]);
+
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
     editor.focus();
@@ -585,7 +745,7 @@ export default function LiveCodeEditor({
     }
 
     setIsRunning(true);
-    setCodeOutput({ output: 'Menjalankan kode...', error: false });
+    setCodeOutput(null);
 
     if (isJavaScript) {
       const result = await executeJavaScriptInWorker(code, 3000);
@@ -595,99 +755,90 @@ export default function LiveCodeEditor({
     }
 
     const pistonConfig = PISTON_CONFIG[language];
-    if (pistonConfig) {
-      try {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!pistonConfig) {
+      setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
+      setIsRunning(false);
+      return;
+    }
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+    // Detect stdin requirements
+    const stdinCount = detectStdinCount(code, language);
 
-        const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`
-          },
-          body: JSON.stringify({
-            language: pistonConfig.language,
-            version: pistonConfig.version,
-            files: [{ content: code }]
-          }),
-          signal: controller.signal
-        });
+    if (stdinCount > 0) {
+      // Launch interactive terminal
+      setPendingCode(code);
+      setPendingStdinCount(stdinCount);
+      setCollectedInputs([]);
+      setTerminalInputValue('');
+      setTerminalLines([
+        { kind: 'output', text: '$ Program membutuhkan input. Masukkan nilai dan tekan Enter.\n', error: false },
+        { kind: 'input', prompt: 'Input 1: ', value: '', done: false },
+      ]);
+      setTerminalActive(true);
+      setIsRunning(false);
+      return;
+    }
 
-        clearTimeout(timeoutId);
+    // No stdin — execute directly
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-        if (!response.ok) {
-          let errorMsg = 'Error: Server mengembalikan status ' + response.status;
-          if (response.status === 429) {
-            errorMsg = 'Error: Terlalu banyak request. Harap tunggu beberapa detik.';
-          } else if (response.status === 504 || response.status === 408) {
-            errorMsg = 'Error: Waktu eksekusi habis. Periksa apakah ada infinite loop.';
-          } else if (response.status >= 500) {
-            errorMsg = 'Error: Server eksekusi sedang bermasalah.';
-          }
-          setCodeOutput({ output: errorMsg, error: true });
-          setIsRunning(false);
-          return;
-        }
+      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+        body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }] }),
+        signal: controller.signal,
+      });
 
-        const data = await response.json();
+      clearTimeout(timeoutId);
 
-        if (data.compile?.stderr?.trim()) {
-          setCodeOutput({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
-          setIsRunning(false);
-          return;
-        }
-
-        if (data.run?.signal === 'SIGKILL') {
-          setCodeOutput({
-            output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan terjadi infinite loop atau recursion tanpa batas.\nPeriksa kembali logika perulangan/rekursi Anda.',
-            error: true
-          });
-          setIsRunning(false);
-          return;
-        }
-
-        const hasStderr = data.run?.stderr?.trim();
-        const hasStdout = data.run?.stdout?.trim();
-
-        if (hasStderr && hasStdout) {
-          setCodeOutput({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
-        } else if (hasStderr) {
-          setCodeOutput({ output: 'Error:\n' + String(data.run.stderr), error: true });
-        } else if (hasStdout) {
-          setCodeOutput({ output: String(data.run.stdout), error: false });
-        } else {
-          setCodeOutput({ output: '(Eksekusi berhasil tanpa output)', error: false });
-        }
-        setIsRunning(false);
-        return;
-      } catch (err: any) {
-        if (err.name === 'AbortError') {
-          setCodeOutput({
-            output: 'Error: Waktu eksekusi habis (timeout 15 detik).\nKemungkinan terjadi infinite loop. Periksa kembali logika perulangan Anda.',
-            error: true
-          });
-        } else if (err.name === 'TypeError') {
-          setCodeOutput({
-            output: 'Error: Tidak dapat terhubung ke server. Pastikan koneksi internet Anda aktif.',
-            error: true
-          });
-        } else {
-          setCodeOutput({
-            output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'),
-            error: true
-          });
-        }
+      if (!response.ok) {
+        let errorMsg = 'Error: Server mengembalikan status ' + response.status;
+        if (response.status === 429) errorMsg = 'Error: Terlalu banyak request. Harap tunggu beberapa detik.';
+        else if (response.status === 504 || response.status === 408) errorMsg = 'Error: Waktu eksekusi habis.';
+        else if (response.status >= 500) errorMsg = 'Error: Server eksekusi sedang bermasalah.';
+        setCodeOutput({ output: errorMsg, error: true });
         setIsRunning(false);
         return;
       }
-    }
 
-    setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
-    setIsRunning(false);
+      const data = await response.json();
+
+      if (data.compile?.stderr?.trim()) {
+        setCodeOutput({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
+        setIsRunning(false);
+        return;
+      }
+      if (data.run?.signal === 'SIGKILL') {
+        setCodeOutput({ output: 'Error: Program dihentikan (timeout/memory limit). Kemungkinan infinite loop.', error: true });
+        setIsRunning(false);
+        return;
+      }
+      const hasStderr = data.run?.stderr?.trim();
+      const hasStdout = data.run?.stdout?.trim();
+      if (hasStderr && hasStdout) {
+        setCodeOutput({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
+      } else if (hasStderr) {
+        setCodeOutput({ output: 'Error:\n' + String(data.run.stderr), error: true });
+      } else if (hasStdout) {
+        setCodeOutput({ output: String(data.run.stdout), error: false });
+      } else {
+        setCodeOutput({ output: '(Eksekusi berhasil tanpa output)', error: false });
+      }
+      setIsRunning(false);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setCodeOutput({ output: 'Error: Timeout 15 detik. Kemungkinan infinite loop.', error: true });
+      } else if (err.name === 'TypeError') {
+        setCodeOutput({ output: 'Error: Tidak dapat terhubung ke server.', error: true });
+      } else {
+        setCodeOutput({ output: 'Error: ' + (err.message || 'Terjadi kesalahan.'), error: true });
+      }
+      setIsRunning(false);
+    }
   }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
@@ -885,7 +1036,94 @@ export default function LiveCodeEditor({
         </div>
       )}
 
-      {codeOutput && !isWebMode && (
+      {/* Interactive Terminal (for stdin languages) */}
+      {terminalLines.length > 0 && !isWebMode && (
+        <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
+          <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${terminalActive ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
+              <span className="text-sm font-mono text-gray-200 font-semibold">Terminal</span>
+              {terminalActive && (
+                <span className="text-xs text-yellow-300 bg-yellow-900/40 px-2 py-0.5 rounded">
+                  Menunggu input...
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => { setTerminalLines([]); setTerminalActive(false); setIsRunning(false); }}
+              className="text-gray-400 hover:text-white text-xs transition-colors"
+            >
+              Tutup
+            </button>
+          </div>
+          <div
+            className="bg-gray-950 p-4 min-h-[120px] max-h-[400px] overflow-auto font-mono text-sm"
+            onClick={() => terminalActive && terminalInputRef.current?.focus()}
+          >
+            {terminalLines.map((line, idx) => {
+              if (line.kind === 'output') {
+                return (
+                  <div
+                    key={idx}
+                    className={line.error ? 'text-red-400' : 'text-gray-200'}
+                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                  >
+                    {line.text}
+                  </div>
+                );
+              }
+              // input line
+              return (
+                <div key={idx} className="flex items-center gap-1 mt-1">
+                  <span className="text-cyan-400 select-none">{line.prompt}</span>
+                  {line.done ? (
+                    <span className="text-white">{line.value}</span>
+                  ) : (
+                    <input
+                      ref={terminalInputRef}
+                      type="text"
+                      value={terminalInputValue}
+                      onChange={e => setTerminalInputValue(e.target.value)}
+                      onKeyDown={handleTerminalKeyDown}
+                      className="flex-1 bg-transparent text-white outline-none caret-white border-b border-cyan-500 focus:border-cyan-300 transition-colors"
+                      style={{ minWidth: 0 }}
+                      autoFocus
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                    />
+                  )}
+                </div>
+              );
+            })}
+            {!terminalActive && terminalLines.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-700 flex gap-2">
+                <button
+                  onClick={() => {
+                    setTerminalLines([]);
+                    setTerminalActive(false);
+                    setCollectedInputs([]);
+                  }}
+                  className="text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                  Bersihkan Terminal
+                </button>
+                <button
+                  onClick={() => runCode()}
+                  className="text-xs text-cyan-400 hover:text-cyan-200 transition-colors"
+                >
+                  Jalankan Ulang
+                </button>
+              </div>
+            )}
+            <div ref={terminalEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Static output terminal (no stdin / JS) */}
+      {codeOutput && !isWebMode && terminalLines.length === 0 && (
         <div className="rounded-lg overflow-hidden border border-gray-600">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
             <div className="flex items-center gap-2">
