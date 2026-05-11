@@ -1,19 +1,19 @@
 import { useRef, useCallback, useState, useEffect, useLayoutEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
-
-const LANGUAGE_LABELS: Record<string, string> = {
-  javascript: 'JavaScript',
-  python: 'Pemograman Python',
-  php: 'Pemograman PHP',
-  cpp: 'C++',
-  htmlcss: 'HTML, CSS Dan Javascript'
-};
+import {
+  LANGUAGE_LABELS,
+  PISTON_CONFIG,
+  TermLine,
+  callPiston,
+  buildTerminalLines,
+  executeJavaScriptInWorker,
+} from '../../utils/codeRunner';
 
 const CODE_TEMPLATES: Record<string, string> = {
   javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`,
   python: `# Python Hello World\nprint("Hello, World!")`,
   php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`,
-  cpp: `#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`
+  cpp: `#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`,
 };
 
 const WEB_DEFAULT_HTML = `<!DOCTYPE html>
@@ -55,13 +55,7 @@ const MONACO_LANGUAGE_MAP: Record<string, string> = {
   python: 'python',
   php: 'php',
   cpp: 'cpp',
-  htmlcss: 'html'
-};
-
-const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
-  python: { language: 'python', version: '3.10.0' },
-  php: { language: 'php', version: '8.2.3' },
-  cpp: { language: 'c++', version: '10.2.0' }
+  htmlcss: 'html',
 };
 
 const WEB_SEPARATOR = '\n<!--__WEB_TAB_SEPARATOR__-->\n';
@@ -79,6 +73,20 @@ function deserializeWebTabs(combined: string): { html: string; css: string; js: 
     css: parts[1] || WEB_DEFAULT_CSS,
     js: parts[2] || WEB_DEFAULT_JS,
   };
+}
+
+function extractBody(html: string): string {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) return bodyMatch[1];
+  if (/<html/i.test(html)) {
+    return html
+      .replace(/<html[^>]*>/i, '')
+      .replace(/<\/html>/i, '')
+      .replace(/<head[\s\S]*?<\/head>/i, '')
+      .replace(/<body[^>]*>/i, '')
+      .replace(/<\/body>/i, '');
+  }
+  return html;
 }
 
 function buildSecureWebPreview(html: string, css: string, js: string): string {
@@ -152,27 +160,16 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
     });
   }
 
-  window.alert = function(msg) {
-    showInPageDialog('alert', msg != null ? String(msg) : '');
-  };
-  window.confirm = function(msg) {
-    showInPageDialog('confirm', msg != null ? String(msg) : '');
-    return false;
-  };
-  window.prompt = function(msg, def) {
-    showInPageDialog('prompt', msg != null ? String(msg) : '', def);
-    return null;
-  };
+  window.alert = function(msg) { showInPageDialog('alert', msg != null ? String(msg) : ''); };
+  window.confirm = function(msg) { showInPageDialog('confirm', msg != null ? String(msg) : ''); return false; };
+  window.prompt = function(msg, def) { showInPageDialog('prompt', msg != null ? String(msg) : '', def); return null; };
 
   window.open = function(url) {
-    if (url && typeof url === 'string' && (url.startsWith('http') || url.startsWith('//'))) {
-      showNavigationWarning();
-    }
+    if (url && typeof url === 'string' && (url.startsWith('http') || url.startsWith('//'))) showNavigationWarning();
     return null;
   };
   window.print = function() {};
 
-  var locDesc = Object.getOwnPropertyDescriptor(window, 'location');
   var fakeLocation = {
     get href() { return ''; },
     set href(v) { showNavigationWarning(); },
@@ -191,8 +188,7 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
   var origDocWrite = document.write.bind(document);
   document.write = function(content) {
     if (typeof content === 'string' && (content.indexOf('http-equiv') !== -1 || content.indexOf('url=') !== -1 || content.indexOf('location') !== -1)) {
-      showNavigationWarning();
-      return;
+      showNavigationWarning(); return;
     }
     origDocWrite(content);
   };
@@ -204,10 +200,7 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
       if (target.tagName === 'A') {
         var href = target.getAttribute('href');
         if (href && href !== '#' && !href.startsWith('#') && !href.startsWith('javascript:void')) {
-          e.preventDefault();
-          e.stopPropagation();
-          showNavigationWarning();
-          return;
+          e.preventDefault(); e.stopPropagation(); showNavigationWarning(); return;
         }
       }
       target = target.parentElement;
@@ -219,10 +212,7 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
     if (form && form.tagName === 'FORM') {
       var action = (form.getAttribute('action') || '').trim();
       if (action && action !== '#' && !action.startsWith('#')) {
-        e.preventDefault();
-        e.stopPropagation();
-        showNavigationWarning();
-        return;
+        e.preventDefault(); e.stopPropagation(); showNavigationWarning(); return;
       }
     }
   }, true);
@@ -232,32 +222,13 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
     while (target && target !== document.body) {
       if (target.tagName === 'BUTTON' || target.tagName === 'INPUT') {
         var onclickAttr = target.getAttribute('onclick') || '';
-        if (onclickAttr) {
-          var dangerous = /(window\\.open|window\\.location|document\\.location|location\\.href|location\\.assign|location\\.replace|document\\.write|closeModal|openModal)/.test(onclickAttr);
-          if (dangerous) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            showNavigationWarning();
-            return;
-          }
+        if (onclickAttr && /(window\\.open|window\\.location|document\\.location|location\\.href|location\\.assign|location\\.replace|document\\.write)/.test(onclickAttr)) {
+          e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); showNavigationWarning(); return;
         }
       }
       target = target.parentElement;
     }
   }, true);
-
-  var origAddEventListener = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function(type, listener, options) {
-    if (type === 'click' && typeof listener === 'function') {
-      var wrappedListener = function(e) {
-        var result = listener.call(this, e);
-        return result;
-      };
-      return origAddEventListener.call(this, type, wrappedListener, options);
-    }
-    return origAddEventListener.call(this, type, listener, options);
-  };
 
   var allMetas = document.querySelectorAll('meta[http-equiv="refresh"]');
   for (var i = 0; i < allMetas.length; i++) { allMetas[i].remove(); }
@@ -265,8 +236,7 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
     mutations.forEach(function(m) {
       m.addedNodes.forEach(function(node) {
         if (node.tagName === 'META' && node.getAttribute && node.getAttribute('http-equiv') === 'refresh') {
-          node.remove();
-          showNavigationWarning();
+          node.remove(); showNavigationWarning();
         }
         if (node.tagName === 'A') {
           var href = node.getAttribute('href');
@@ -280,14 +250,10 @@ function buildSecureWebPreview(html: string, css: string, js: string): string {
 
   var logCount = 0;
   var origLog = console.log;
-  console.log = function() {
-    if (logCount < 50) { logCount++; origLog.apply(console, arguments); }
-  };
+  console.log = function() { if (logCount < 50) { logCount++; origLog.apply(console, arguments); } };
 
   window.addEventListener('message', function(e) {
-    if (e.data && e.data.type === 'SCROLL_PREVIEW') {
-      window.scrollBy(0, e.data.deltaY);
-    }
+    if (e.data && e.data.type === 'SCROLL_PREVIEW') window.scrollBy(0, e.data.deltaY);
   });
 })();`;
 
@@ -303,158 +269,6 @@ ${extractBody(html)}
 </html>`;
 }
 
-function extractBody(html: string): string {
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  if (bodyMatch) return bodyMatch[1];
-  const hasHtml = /<html/i.test(html);
-  if (hasHtml) {
-    const stripped = html
-      .replace(/<html[^>]*>/i, '')
-      .replace(/<\/html>/i, '')
-      .replace(/<head[\s\S]*?<\/head>/i, '')
-      .replace(/<body[^>]*>/i, '')
-      .replace(/<\/body>/i, '');
-    return stripped;
-  }
-  return html;
-}
-
-function createJSWorkerCode(): string {
-  return `
-    self.onmessage = function(e) {
-      const code = e.data.code;
-      const logs = [];
-      const errors = [];
-
-      const fakeConsole = {
-        log: function() {
-          const args = Array.prototype.slice.call(arguments);
-          logs.push(args.map(function(a) {
-            if (typeof a === 'object') {
-              try { return JSON.stringify(a, null, 2); }
-              catch(err) { return String(a); }
-            }
-            return String(a);
-          }).join(' '));
-        },
-        error: function() {
-          const args = Array.prototype.slice.call(arguments);
-          errors.push(args.map(String).join(' '));
-        },
-        warn: function() {
-          const args = Array.prototype.slice.call(arguments);
-          logs.push('[WARN] ' + args.map(String).join(' '));
-        },
-        info: function() {
-          const args = Array.prototype.slice.call(arguments);
-          logs.push('[INFO] ' + args.map(String).join(' '));
-        }
-      };
-
-      const blockedMsg = '[DIBLOKIR] Fungsi ini diblokir untuk keamanan ujian.';
-      const fakeWindow = {
-        alert: function() { logs.push(blockedMsg + ' (alert)'); },
-        confirm: function() { logs.push(blockedMsg + ' (confirm)'); return false; },
-        prompt: function() { logs.push(blockedMsg + ' (prompt)'); return null; },
-        open: function() { logs.push(blockedMsg + ' (window.open)'); return null; },
-        close: function() { logs.push(blockedMsg + ' (window.close)'); },
-        print: function() { logs.push(blockedMsg + ' (print)'); },
-        location: {
-          href: '',
-          assign: function() { logs.push(blockedMsg + ' (location.assign)'); },
-          replace: function() { logs.push(blockedMsg + ' (location.replace)'); },
-          reload: function() { logs.push(blockedMsg + ' (location.reload)'); }
-        },
-        document: {
-          write: function() { logs.push(blockedMsg + ' (document.write)'); },
-          writeln: function() { logs.push(blockedMsg + ' (document.writeln)'); },
-          cookie: ''
-        },
-        localStorage: {
-          getItem: function() { return null; },
-          setItem: function() { logs.push(blockedMsg + ' (localStorage)'); },
-          removeItem: function() {},
-          clear: function() {}
-        },
-        sessionStorage: {
-          getItem: function() { return null; },
-          setItem: function() { logs.push(blockedMsg + ' (sessionStorage)'); },
-          removeItem: function() {},
-          clear: function() {}
-        },
-        fetch: function() { logs.push(blockedMsg + ' (fetch)'); return Promise.reject(new Error('fetch diblokir')); },
-        XMLHttpRequest: function() { logs.push(blockedMsg + ' (XMLHttpRequest)'); },
-        safeEval: function() { logs.push(blockedMsg + ' (eval)'); },
-        SafeFunction: function() { logs.push(blockedMsg + ' (Function constructor)'); }
-      };
-
-      try {
-        const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage) {' +
-          code +
-          '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage);';
-
-        const fn = new Function('fakeConsole', 'fakeWindow', wrappedCode);
-        fn(fakeConsole, fakeWindow);
-
-        self.postMessage({
-          success: true,
-          output: logs.join('\\n'),
-          errors: errors.join('\\n')
-        });
-      } catch(err) {
-        self.postMessage({
-          success: false,
-          output: logs.join('\\n'),
-          errors: err.toString()
-        });
-      }
-    };
-  `;
-}
-
-function executeJavaScriptInWorker(code: string, timeout: number = 3000): Promise<{ output: string; error: boolean }> {
-  return new Promise((resolve) => {
-    const blob = new Blob([createJSWorkerCode()], { type: 'application/javascript' });
-    const workerUrl = URL.createObjectURL(blob);
-    const worker = new Worker(workerUrl);
-
-    const timeoutId = setTimeout(() => {
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-      resolve({
-        output: 'Error: Waktu eksekusi habis (Timeout 3 detik).\nKemungkinan kode Anda memiliki perulangan tanpa henti (Infinite Loop).\nHarap periksa kembali logika loop Anda.',
-        error: true
-      });
-    }, timeout);
-
-    worker.onmessage = (e) => {
-      clearTimeout(timeoutId);
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-
-      const { success, output, errors } = e.data;
-      if (success) {
-        if (errors) {
-          resolve({ output: output + (output ? '\n' : '') + 'Errors:\n' + errors, error: true });
-        } else {
-          resolve({ output: output || '(Eksekusi berhasil tanpa output)', error: false });
-        }
-      } else {
-        resolve({ output: (output ? output + '\n' : '') + 'Error: ' + errors, error: true });
-      }
-    };
-
-    worker.onerror = (e) => {
-      clearTimeout(timeoutId);
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-      resolve({ output: 'Worker Error: ' + e.message, error: true });
-    };
-
-    worker.postMessage({ code });
-  });
-}
-
 interface LiveCodeEditorProps {
   questionId: string;
   language: string;
@@ -468,15 +282,6 @@ interface LiveCodeEditorProps {
   setShowCancelConfirm: (val: string | null) => void;
   codeMessage: { text: string; type: 'success' | 'error' | 'warning' } | undefined;
 }
-
-// Terminal line types:
-// 'system'  — dim gray  — compile/run commands like "$ g++ ..."
-// 'output'  — white     — program stdout
-// 'error'   — red       — errors/stderr
-// 'input'   — cyan      — echoed user input (after submission)
-// 'prompt'  — white     — live prompt text waiting for input (rendered inline with input field)
-type TermLineType = 'system' | 'output' | 'error' | 'input' | 'prompt';
-interface TermLine { text: string; type: TermLineType }
 
 export default function LiveCodeEditor({
   questionId,
@@ -496,21 +301,16 @@ export default function LiveCodeEditor({
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
-  // ── Terminal state ──────────────────────────────────────────────
+  // Terminal
   const [termOpen, setTermOpen] = useState(false);
   const [termLines, setTermLines] = useState<TermLine[]>([]);
-  const [awaitingInput, setAwaitingInput] = useState(false);
-  const [termInput, setTermInput] = useState('');
-  // Remaining prompt texts queued for collection
-  const pendingPrompts = useRef<string[]>([]);
-  // Accumulated [prompt, value] pairs for final merge
-  const collectedPairs = useRef<{ prompt: string; value: string }[]>([]);
-  const termInputRef = useRef<HTMLInputElement>(null);
+  const [stdinValue, setStdinValue] = useState('');
+  const [stdinExpanded, setStdinExpanded] = useState(false);
   const termEndRef = useRef<HTMLDivElement>(null);
-  // ────────────────────────────────────────────────────────────────
 
   const isWebMode = language === 'htmlcss';
   const isJavaScript = language === 'javascript';
+  const langLabel = language === 'cpp' ? 'C++' : language;
 
   const [webActiveTab, setWebActiveTab] = useState<WebTab>('html');
   const [webHtml, setWebHtml] = useState(WEB_DEFAULT_HTML);
@@ -522,7 +322,6 @@ export default function LiveCodeEditor({
   useEffect(() => {
     if (!isWebMode || webInitialized.current) return;
     webInitialized.current = true;
-
     const source = currentDraft ?? savedAnswer ?? '';
     if (source.includes(WEB_SEPARATOR)) {
       const parsed = deserializeWebTabs(source);
@@ -530,8 +329,7 @@ export default function LiveCodeEditor({
       setWebCss(parsed.css);
       setWebJs(parsed.js);
     } else if (!source.trim()) {
-      const serialized = serializeWebTabs(WEB_DEFAULT_HTML, WEB_DEFAULT_CSS, WEB_DEFAULT_JS);
-      onDraftChange(questionId, serialized);
+      onDraftChange(questionId, serializeWebTabs(WEB_DEFAULT_HTML, WEB_DEFAULT_CSS, WEB_DEFAULT_JS));
     }
   }, [isWebMode, currentDraft, savedAnswer, questionId, onDraftChange]);
 
@@ -558,84 +356,53 @@ export default function LiveCodeEditor({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  // Auto-scroll terminal to bottom
   useLayoutEffect(() => {
     termEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [termLines, awaitingInput]);
+  }, [termLines]);
 
-  // Focus input when awaiting
-  useEffect(() => {
-    if (awaitingInput) termInputRef.current?.focus();
-  }, [awaitingInput]);
+  const runCode = useCallback(async () => {
+    if (isWebMode) { setHtmlPreview(true); return; }
 
-  // ── Helpers ─────────────────────────────────────────────────────
-  function detectCinCount(code: string, lang: string): number {
-    if (lang === 'cpp') return (code.match(/\bcin\s*>>/g) || []).length;
-    if (lang === 'python') return (code.match(/\binput\s*\(/g) || []).length;
-    if (lang === 'php') return (code.match(/\bfgets\s*\(|\breadline\s*\(|\bfscanf\s*\(/g) || []).length;
-    return 0;
-  }
-
-  function extractPromptTexts(code: string, lang: string): string[] {
-    const prompts: string[] = [];
-    if (lang === 'cpp') {
-      const re = /cout\s*<<\s*((?:"[^"]*"|'[^']*'|\s*<<\s*(?:"[^"]*"|'[^']*'))*)\s*;?\s*cin\s*>>/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) {
-        const raw = m[1].replace(/<<\s*/g, '').replace(/\s*endl\b/g, '').replace(/\\n/g, '').replace(/["']/g, '').trim();
-        prompts.push(raw || '');
-      }
-      const cinCount = (code.match(/\bcin\s*>>/g) || []).length;
-      while (prompts.length < cinCount) prompts.push('');
-    } else if (lang === 'python') {
-      const re = /\binput\s*\(\s*(["'])(.*?)\1\s*\)/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) prompts.push(m[2] || '');
-      const inputCount = (code.match(/\binput\s*\(/g) || []).length;
-      while (prompts.length < inputCount) prompts.push('');
-    } else {
-      const count = detectCinCount(code, lang);
-      for (let i = 0; i < count; i++) prompts.push('');
+    const code = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
+    if (!code.trim()) {
+      setTermOpen(true);
+      setTermLines([{ text: 'Error: Kode kosong!', type: 'error' }]);
+      return;
     }
-    return prompts;
-  }
 
-  // Merge typed values back into stdout to produce realistic terminal output.
-  // Piston doesn't echo stdin — we reconstruct by finding each prompt string in
-  // stdout and appending the typed value right after it on the same line.
-  function mergeStdinIntoOutput(stdout: string, pairs: { prompt: string; value: string }[]): string {
-    if (!pairs.length) return stdout;
-    let remaining = stdout;
-    const parts: string[] = [];
-    for (const { prompt, value } of pairs) {
-      if (prompt) {
-        const idx = remaining.indexOf(prompt);
-        if (idx !== -1) {
-          if (idx > 0) parts.push(remaining.slice(0, idx));
-          parts.push(prompt + value + '\n');
-          remaining = remaining.slice(idx + prompt.length);
-          continue;
-        }
-      }
-      // No prompt text or not found — just echo the value on its own line
-      parts.push(value + '\n');
+    setTermOpen(true);
+    setTermLines([{ text: `Compiling ${langLabel}...`, type: 'system' }]);
+    setIsRunning(true);
+
+    if (isJavaScript) {
+      const result = await executeJavaScriptInWorker(code, 3000);
+      setTermLines([
+        { text: 'Running JavaScript...', type: 'system' },
+        { text: result.output, type: result.error ? 'error' : 'output' },
+      ]);
+      setIsRunning(false);
+      return;
     }
-    const tail = remaining.replace(/^\n/, '').trimEnd();
-    if (tail) parts.push(tail);
-    return parts.join('');
-  }
 
-  function addLines(lines: TermLine[]) {
-    setTermLines(prev => [...prev, ...lines]);
-  }
+    if (!PISTON_CONFIG[language]) {
+      setTermLines([{ text: 'Bahasa tidak didukung.', type: 'error' }]);
+      setIsRunning(false);
+      return;
+    }
 
-  function replaceLoadingLine(lines: TermLine[]) {
-    setTermLines(prev => {
-      const filtered = prev.filter(l => l.text !== '...');
-      return [...filtered, ...lines];
-    });
-  }
-  // ────────────────────────────────────────────────────────────────
+    await new Promise(r => setTimeout(r, 200));
+    setTermLines(prev => [...prev, { text: 'Running...', type: 'system' }, { text: '...', type: 'system' }]);
+
+    const result = await callPiston(language, code, stdinValue);
+    const outLines = buildTerminalLines(result);
+    setTermLines([
+      { text: `Compiling ${langLabel}...`, type: 'system' },
+      { text: 'Running...', type: 'system' },
+      ...outLines,
+      { text: '\n[Program selesai]', type: 'system' },
+    ]);
+    setIsRunning(false);
+  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language, langLabel, stdinValue]);
 
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
@@ -648,14 +415,10 @@ export default function LiveCodeEditor({
 
   const handleWebEditorChange = useCallback((value: string | undefined) => {
     const v = value || '';
-    let newHtml = webHtml;
-    let newCss = webCss;
-    let newJs = webJs;
-
+    let newHtml = webHtml, newCss = webCss, newJs = webJs;
     if (webActiveTab === 'html') { newHtml = v; setWebHtml(v); }
     else if (webActiveTab === 'css') { newCss = v; setWebCss(v); }
     else { newJs = v; setWebJs(v); }
-
     onDraftChange(questionId, serializeWebTabs(newHtml, newCss, newJs));
   }, [questionId, onDraftChange, webActiveTab, webHtml, webCss, webJs]);
 
@@ -671,203 +434,12 @@ export default function LiveCodeEditor({
     return 'javascript';
   };
 
-  // ── Core execute call ────────────────────────────────────────────
-  const callRunCode = useCallback(async (code: string, stdin: string): Promise<{
-    stdout: string; stderr: string; compileErr: string; signal: string | null; httpErr: string | null;
-  }> => {
-    const pistonConfig = PISTON_CONFIG[language];
-    if (!pistonConfig) return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: 'Bahasa tidak didukung.' };
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-        body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }], stdin }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) {
-        const msg = res.status === 429 ? 'Terlalu banyak request, tunggu sebentar.'
-          : res.status >= 500 ? 'Server eksekusi sedang bermasalah.'
-          : `Server error ${res.status}`;
-        return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: msg };
-      }
-      const data = await res.json();
-      return {
-        stdout: String(data.run?.stdout || ''),
-        stderr: String(data.run?.stderr || ''),
-        compileErr: String(data.compile?.stderr || ''),
-        signal: data.run?.signal ?? null,
-        httpErr: null,
-      };
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      const msg = err.name === 'AbortError' ? 'Timeout (20 detik). Kemungkinan infinite loop.'
-        : err.name === 'TypeError' ? 'Tidak dapat terhubung ke server.'
-        : err.message || 'Terjadi kesalahan tidak diketahui.';
-      return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: msg };
-    }
-  }, [language]);
-
-  // ── Build final terminal output after execution ──────────────────
-  const buildTerminalOutput = useCallback((
-    stdout: string,
-    stderr: string,
-    compileErr: string,
-    signal: string | null,
-    httpErr: string | null,
-    pairs: { prompt: string; value: string }[]
-  ): TermLine[] => {
-    const lines: TermLine[] = [];
-    if (httpErr) {
-      lines.push({ text: 'Error: ' + httpErr, type: 'error' });
-      return lines;
-    }
-    if (compileErr.trim()) {
-      lines.push({ text: compileErr.trim(), type: 'error' });
-      return lines;
-    }
-    if (signal === 'SIGKILL') {
-      lines.push({ text: 'Program dihentikan paksa (timeout / memory limit). Periksa infinite loop.', type: 'error' });
-      return lines;
-    }
-    const merged = pairs.length > 0 ? mergeStdinIntoOutput(stdout, pairs) : stdout;
-    const finalOut = merged.trimEnd();
-    if (finalOut) lines.push({ text: finalOut, type: 'output' });
-    if (stderr.trim()) {
-      if (finalOut) lines.push({ text: '', type: 'output' });
-      lines.push({ text: stderr.trim(), type: 'error' });
-    }
-    if (!finalOut && !stderr.trim()) {
-      lines.push({ text: '(Program selesai tanpa output)', type: 'system' });
-    }
-    return lines;
-  }, []);
-
-  // ── Main run handler ─────────────────────────────────────────────
-  const runCode = useCallback(async () => {
-    if (isWebMode) { setHtmlPreview(true); return; }
-
-    const code = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
-    if (!code.trim()) {
-      setTermOpen(true);
-      setTermLines([{ text: 'Error: Kode kosong!', type: 'error' }]);
-      return;
-    }
-
-    // Reset terminal
-    setTermOpen(true);
-    setTermLines([]);
-    setTermInput('');
-    setAwaitingInput(false);
-    pendingPrompts.current = [];
-    collectedPairs.current = [];
-    setIsRunning(true);
-
-    if (isJavaScript) {
-      setTermLines([{ text: 'Running JavaScript...', type: 'system' }]);
-      const result = await executeJavaScriptInWorker(code, 3000);
-      setTermLines([
-        { text: 'Running JavaScript...', type: 'system' },
-        { text: result.output, type: result.error ? 'error' : 'output' },
-      ]);
-      setIsRunning(false);
-      return;
-    }
-
-    const pistonConfig = PISTON_CONFIG[language];
-    if (!pistonConfig) {
-      setTermLines([{ text: 'Bahasa tidak didukung.', type: 'error' }]);
-      setIsRunning(false);
-      return;
-    }
-
-    const langLabel = language === 'cpp' ? 'C++' : language;
-    const cinCount = detectCinCount(code, language);
-
-    // Show compile animation
-    setTermLines([{ text: `Compiling ${langLabel}...`, type: 'system' }]);
-    await new Promise(r => setTimeout(r, 300));
-
-    if (cinCount > 0) {
-      // Needs input — collect before running
-      const prompts = extractPromptTexts(code, language);
-      pendingPrompts.current = prompts.slice(1);
-      setTermLines([
-        { text: `Compiling ${langLabel}...`, type: 'system' },
-        { text: `Running...`, type: 'system' },
-        { text: prompts[0], type: 'prompt' },
-      ]);
-      setAwaitingInput(true);
-      setIsRunning(false);
-    } else {
-      // No input needed — run directly
-      setTermLines([
-        { text: `Compiling ${langLabel}...`, type: 'system' },
-        { text: `Running...`, type: 'system' },
-        { text: '...', type: 'system' },
-      ]);
-      const result = await callRunCode(code, '');
-      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, []);
-      setTermLines([
-        { text: `Compiling ${langLabel}...`, type: 'system' },
-        { text: `Running...`, type: 'system' },
-        ...outLines,
-      ]);
-      setIsRunning(false);
-    }
-  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language, callRunCode, buildTerminalOutput]);
-
-  // ── Handle stdin submission ──────────────────────────────────────
-  const handleTerminalSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    const value = termInput;
-    const code = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
-
-    // Grab current prompt text from last 'prompt' line
-    setTermLines(prev => {
-      const lastPromptIdx = [...prev].map(l => l.type).lastIndexOf('prompt');
-      if (lastPromptIdx === -1) return [...prev, { text: value, type: 'input' as TermLineType }];
-      const updated = [...prev];
-      // Echo: prompt text + typed value on same line as 'input'
-      updated[lastPromptIdx] = { text: updated[lastPromptIdx].text + value, type: 'input' };
-      return updated;
-    });
-    setTermInput('');
-
-    collectedPairs.current = [
-      ...collectedPairs.current,
-      {
-        prompt: termLines.slice().reverse().find(l => l.type === 'prompt')?.text ?? '',
-        value,
-      },
-    ];
-
-    if (pendingPrompts.current.length > 0) {
-      const next = pendingPrompts.current.shift()!;
-      setTermLines(prev => [...prev, { text: next, type: 'prompt' }]);
-    } else {
-      // All inputs collected — execute
-      setAwaitingInput(false);
-      setIsRunning(true);
-      const stdinString = collectedPairs.current.map(p => p.value).join('\n') + '\n';
-      addLines([{ text: '...', type: 'system' }]);
-
-      const langLabel = language === 'cpp' ? 'C++' : language;
-      const result = await callRunCode(code, stdinString);
-      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, collectedPairs.current);
-      setTermLines(prev => {
-        const filtered = prev.filter(l => l.text !== '...' || l.type !== 'system');
-        return [...filtered, ...outLines];
-      });
-      setIsRunning(false);
-      // Show exit line
-      setTermLines(prev => [...prev, { text: `\n[Program selesai, exit code 0]`, type: 'system' }]);
-    }
-  }, [termInput, termLines, language, currentDraft, savedAnswer, callRunCode, buildTerminalOutput]);
+  const resetWebTemplate = useCallback(() => {
+    setWebHtml(WEB_DEFAULT_HTML);
+    setWebCss(WEB_DEFAULT_CSS);
+    setWebJs(WEB_DEFAULT_JS);
+    onDraftChange(questionId, serializeWebTabs(WEB_DEFAULT_HTML, WEB_DEFAULT_CSS, WEB_DEFAULT_JS));
+  }, [questionId, onDraftChange]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
   const showPreviewPanel = isWebMode && htmlPreview;
@@ -910,13 +482,6 @@ export default function LiveCodeEditor({
     parameterHints: { enabled: false },
   };
 
-  const resetWebTemplate = useCallback(() => {
-    setWebHtml(WEB_DEFAULT_HTML);
-    setWebCss(WEB_DEFAULT_CSS);
-    setWebJs(WEB_DEFAULT_JS);
-    onDraftChange(questionId, serializeWebTabs(WEB_DEFAULT_HTML, WEB_DEFAULT_CSS, WEB_DEFAULT_JS));
-  }, [questionId, onDraftChange]);
-
   return (
     <div className="space-y-3">
       {toastMsg && (
@@ -930,36 +495,20 @@ export default function LiveCodeEditor({
           <span className="text-sm bg-teal-600 text-white px-3 py-1 rounded font-medium">
             {LANGUAGE_LABELS[language] || language}
           </span>
-          {isJavaScript && (
-            <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded">
-              Client-side
-            </span>
-          )}
+          {isJavaScript && <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded">Client-side</span>}
           {(language === 'python' || language === 'php' || language === 'cpp') && (
-            <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded">
-              Server-side
-            </span>
+            <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded">Server-side</span>
           )}
           <button
-            onClick={() => {
-              if (isWebMode) {
-                resetWebTemplate();
-              } else {
-                onDraftChange(questionId, CODE_TEMPLATES[language] || '');
-              }
-            }}
+            onClick={isWebMode ? resetWebTemplate : () => onDraftChange(questionId, CODE_TEMPLATES[language] || '')}
             className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors"
           >
             Reset Template
           </button>
         </div>
         <div className="flex items-center gap-2">
-          {hasUnsavedChanges && (
-            <span className="text-sm text-yellow-400 animate-pulse">* Perubahan belum disimpan</span>
-          )}
-          {savedAnswer && !hasUnsavedChanges && (
-            <span className="text-sm text-green-400">Tersimpan</span>
-          )}
+          {hasUnsavedChanges && <span className="text-sm text-yellow-400 animate-pulse">* Perubahan belum disimpan</span>}
+          {savedAnswer && !hasUnsavedChanges && <span className="text-sm text-green-400">Tersimpan</span>}
         </div>
       </div>
 
@@ -984,18 +533,16 @@ export default function LiveCodeEditor({
           setHtmlPreview={setHtmlPreview}
         />
       ) : (
-        <div>
-          <div className="rounded-lg overflow-hidden border border-gray-600 shadow-lg">
-            <Editor
-              height="400px"
-              language={monacoLang}
-              value={displayCode}
-              onChange={handleEditorChange}
-              onMount={handleEditorMount}
-              theme="vs-dark"
-              options={editorOptions}
-            />
-          </div>
+        <div className="rounded-lg overflow-hidden border border-gray-600 shadow-lg">
+          <Editor
+            height="400px"
+            language={monacoLang}
+            value={displayCode}
+            onChange={handleEditorChange}
+            onMount={handleEditorMount}
+            theme="vs-dark"
+            options={editorOptions}
+          />
         </div>
       )}
 
@@ -1015,9 +562,9 @@ export default function LiveCodeEditor({
         {!isWebMode && (
           <button
             onClick={runCode}
-            disabled={isRunning || awaitingInput}
+            disabled={isRunning}
             className={`flex items-center gap-2 font-bold py-2 px-5 rounded transition-all text-sm shadow ${
-              isRunning || awaitingInput
+              isRunning
                 ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                 : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white'
             }`}
@@ -1050,6 +597,41 @@ export default function LiveCodeEditor({
         )}
       </div>
 
+      {/* Stdin input — shown for server-side languages that may need input */}
+      {!isWebMode && !isJavaScript && (
+        <div className="rounded-lg overflow-hidden border border-gray-700">
+          <button
+            onClick={() => setStdinExpanded(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 bg-[#1a1a1a] text-xs font-mono text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              stdin (input program)
+              {stdinValue && <span className="bg-cyan-700 text-cyan-200 px-1.5 py-0.5 rounded text-[10px]">{stdinValue.trim().split('\n').length} baris</span>}
+            </span>
+            <span>{stdinExpanded ? '▲' : '▼'}</span>
+          </button>
+          {stdinExpanded && (
+            <div className="bg-[#0d0d0d] p-3">
+              <p className="text-[11px] text-gray-500 font-mono mb-2">
+                Ketik semua input yang dibutuhkan program, satu per baris. Contoh: jika program meminta 3 angka, ketik masing-masing di baris terpisah.
+              </p>
+              <textarea
+                value={stdinValue}
+                onChange={e => setStdinValue(e.target.value)}
+                className="w-full bg-[#111] border border-gray-700 rounded text-gray-100 font-mono text-sm p-3 resize-y outline-none focus:border-cyan-600 transition-colors"
+                rows={4}
+                placeholder={"1\nToni\nFantasi\n..."}
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {codeMessage && (
         <div className={`p-3 rounded-md text-sm font-medium ${
           codeMessage.type === 'success' ? 'bg-green-800 text-green-200 border border-green-500' :
@@ -1064,16 +646,10 @@ export default function LiveCodeEditor({
         <div className="bg-yellow-900 border border-yellow-500 p-4 rounded-md">
           <p className="text-yellow-200 mb-3">Kode belum disimpan. Apakah Anda yakin ingin membatalkan perubahan?</p>
           <div className="flex gap-2">
-            <button
-              onClick={() => onPerformCancel(questionId)}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded text-sm"
-            >
+            <button onClick={() => onPerformCancel(questionId)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded text-sm">
               Ya, Batalkan
             </button>
-            <button
-              onClick={() => setShowCancelConfirm(null)}
-              className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded text-sm"
-            >
+            <button onClick={() => setShowCancelConfirm(null)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded text-sm">
               Tidak, Kembali
             </button>
           </div>
@@ -1091,10 +667,8 @@ export default function LiveCodeEditor({
 
       {termOpen && !isWebMode && (
         <div className="rounded-lg overflow-hidden border border-gray-700 shadow-xl">
-          {/* Terminal header — mimics OnlineGDB */}
           <div className="flex items-center justify-between bg-[#1a1a1a] px-4 py-2 border-b border-gray-700">
             <div className="flex items-center gap-3">
-              {/* macOS-style traffic lights */}
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-full bg-red-500 opacity-80" />
                 <span className="w-3 h-3 rounded-full bg-yellow-500 opacity-80" />
@@ -1112,20 +686,9 @@ export default function LiveCodeEditor({
                   running
                 </span>
               )}
-              {awaitingInput && !isRunning && (
-                <span className="text-xs text-cyan-400 font-mono animate-pulse">● stdin</span>
-              )}
             </div>
             <button
-              onClick={() => {
-                setTermOpen(false);
-                setTermLines([]);
-                setTermInput('');
-                setAwaitingInput(false);
-                pendingPrompts.current = [];
-                collectedPairs.current = [];
-                setIsRunning(false);
-              }}
+              onClick={() => { setTermOpen(false); setTermLines([]); setIsRunning(false); }}
               className="text-gray-500 hover:text-gray-200 transition-colors text-xs px-2 py-0.5 rounded hover:bg-gray-700"
               title="Tutup terminal"
             >
@@ -1133,18 +696,15 @@ export default function LiveCodeEditor({
             </button>
           </div>
 
-          {/* Terminal body */}
           <div
             className="bg-[#0d0d0d] font-mono text-sm leading-relaxed overflow-auto"
-            style={{ minHeight: '160px', maxHeight: '340px', padding: '12px 16px' }}
-            onClick={() => awaitingInput && termInputRef.current?.focus()}
+            style={{ minHeight: '160px', maxHeight: '400px', padding: '12px 16px' }}
           >
             {termLines.map((line, i) => {
               const colorClass =
-                line.type === 'system'  ? 'text-gray-500' :
-                line.type === 'error'   ? 'text-red-400' :
-                line.type === 'input'   ? 'text-cyan-300' :
-                line.type === 'prompt'  ? 'text-gray-100' :
+                line.type === 'system' ? 'text-gray-500' :
+                line.type === 'error'  ? 'text-red-400' :
+                line.type === 'input'  ? 'text-cyan-300' :
                 'text-gray-100';
               return (
                 <div key={i} className={colorClass} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -1158,25 +718,6 @@ export default function LiveCodeEditor({
                 </div>
               );
             })}
-
-            {/* Inline input row — appears right after the last prompt line */}
-            {awaitingInput && (
-              <form onSubmit={handleTerminalSubmit} className="flex items-center mt-0">
-                <input
-                  ref={termInputRef}
-                  type="text"
-                  value={termInput}
-                  onChange={e => setTermInput(e.target.value)}
-                  className="bg-transparent border-none outline-none text-cyan-200 font-mono text-sm flex-1 caret-cyan-400"
-                  style={{ minWidth: 0 }}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder=""
-                />
-                <span className="text-cyan-400 animate-[blink_1s_step-end_infinite] ml-0.5 select-none">█</span>
-              </form>
-            )}
-
             <div ref={termEndRef} />
           </div>
         </div>
@@ -1245,7 +786,6 @@ function WebModeLayout({
             </button>
           ))}
         </div>
-
         <div className="rounded-b-lg overflow-hidden border border-t-0 border-gray-600 shadow-lg">
           <Editor
             height="400px"
@@ -1274,30 +814,18 @@ function WebModeLayout({
               <div className="flex bg-gray-700 rounded overflow-hidden">
                 <button
                   onClick={() => setPreviewMode('desktop')}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${
-                    previewMode === 'desktop' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  Desktop
-                </button>
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${previewMode === 'desktop' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                >Desktop</button>
                 <button
                   onClick={() => setPreviewMode('mobile')}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${
-                    previewMode === 'mobile' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  Mobile
-                </button>
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${previewMode === 'mobile' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                >Mobile</button>
               </div>
-              <button
-                onClick={() => setHtmlPreview(false)}
-                className="text-gray-400 hover:text-white text-xs transition-colors ml-1"
-              >
+              <button onClick={() => setHtmlPreview(false)} className="text-gray-400 hover:text-white text-xs transition-colors ml-1">
                 Tutup
               </button>
             </div>
           </div>
-
           <div className="bg-gray-100 flex justify-center relative" style={{ height: '480px', overflow: 'hidden' }}>
             <iframe
               srcDoc={buildSecureWebPreview(webHtml, webCss, webJs)}

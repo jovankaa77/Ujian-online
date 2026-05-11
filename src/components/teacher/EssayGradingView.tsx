@@ -1,21 +1,8 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import Editor from '@monaco-editor/react';
-
-const LANGUAGE_LABELS: Record<string, string> = {
-  javascript: 'JavaScript',
-  python: 'Python',
-  php: 'PHP',
-  cpp: 'C++',
-  htmlcss: 'HTML, CSS Dan Javascript'
-};
-
-const PISTON_CONFIG: Record<string, { language: string; version: string }> = {
-  python: { language: 'python', version: '3.10.0' },
-  php: { language: 'php', version: '8.2.3' },
-  cpp: { language: 'c++', version: '10.2.0' }
-};
+import { LANGUAGE_LABELS, TermLine, callPiston, buildTerminalLines, executeJavaScriptInWorker } from '../../utils/codeRunner';
 
 interface Question {
   id: string;
@@ -98,22 +85,15 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [essayScores, setEssayScores] = useState<{ [key: string]: number }>(session.essayScores || {});
   const [livecodeScores, setLivecodeScores] = useState<{ [key: string]: number }>(session.livecodeScores || {});
   const [isSaving, setIsSaving] = useState(false);
-  const [codeOutputs, setCodeOutputs] = useState<{ [key: string]: { output: string; error: boolean } }>({});
   const [runningCode, setRunningCode] = useState<{ [key: string]: boolean }>({});
   const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
   const [htmlActiveTabs, setHtmlActiveTabs] = useState<{ [key: string]: WebTab }>({});
   const [htmlPreviewModes, setHtmlPreviewModes] = useState<{ [key: string]: PreviewMode }>({});
 
-  // Terminal state (keyed by questionId)
-  type TLine = { text: string; type: 'system' | 'output' | 'error' | 'input' | 'prompt' };
   const [termOpen, setTermOpen] = useState<{ [key: string]: boolean }>({});
-  const [termLines, setTermLines] = useState<{ [key: string]: TLine[] }>({});
-  const [termInputs, setTermInputs] = useState<{ [key: string]: string }>({});
-  const [awaitingInput, setAwaitingInput] = useState<{ [key: string]: boolean }>({});
-  const pendingPromptsRef = useRef<{ [key: string]: string[] }>({});
-  const collectedPairs = useRef<{ [key: string]: { prompt: string; value: string }[] }>({});
-  const termInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
-  const termEndRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  const [termLines, setTermLines] = useState<{ [key: string]: TermLine[] }>({});
+  const [stdinValues, setStdinValues] = useState<{ [key: string]: string }>({});
+  const [stdinExpanded, setStdinExpanded] = useState<{ [key: string]: boolean }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
     const newScores = { ...essayScores };
@@ -127,222 +107,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     setLivecodeScores(newScores);
   };
 
-  const executeJavaScriptInWorker = (code: string, timeout: number = 3000): Promise<{ output: string; error: boolean }> => {
-    return new Promise((resolve) => {
-      const workerCode = `
-        self.onmessage = function(e) {
-          const code = e.data.code;
-          const logs = [];
-          const errors = [];
-
-          const fakeConsole = {
-            log: function() {
-              const args = Array.prototype.slice.call(arguments);
-              logs.push(args.map(function(a) {
-                if (typeof a === 'object') {
-                  try { return JSON.stringify(a, null, 2); }
-                  catch(err) { return String(a); }
-                }
-                return String(a);
-              }).join(' '));
-            },
-            error: function() {
-              const args = Array.prototype.slice.call(arguments);
-              errors.push(args.map(String).join(' '));
-            },
-            warn: function() {
-              const args = Array.prototype.slice.call(arguments);
-              logs.push('[WARN] ' + args.map(String).join(' '));
-            },
-            info: function() {
-              const args = Array.prototype.slice.call(arguments);
-              logs.push('[INFO] ' + args.map(String).join(' '));
-            }
-          };
-
-          const blockedMsg = '[DIBLOKIR] Fungsi ini diblokir untuk keamanan.';
-          const fakeWindow = {
-            alert: function() { logs.push(blockedMsg + ' (alert)'); },
-            confirm: function() { logs.push(blockedMsg + ' (confirm)'); return false; },
-            prompt: function() { logs.push(blockedMsg + ' (prompt)'); return null; },
-            open: function() { logs.push(blockedMsg + ' (window.open)'); return null; },
-            close: function() { logs.push(blockedMsg + ' (window.close)'); },
-            print: function() { logs.push(blockedMsg + ' (print)'); },
-            location: { href: '', assign: function() {}, replace: function() {}, reload: function() {} },
-            document: { write: function() {}, writeln: function() {}, cookie: '' },
-            localStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
-            sessionStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
-            fetch: function() { return Promise.reject(new Error('fetch diblokir')); },
-            XMLHttpRequest: function() {},
-            safeEval: function() {},
-            SafeFunction: function() {}
-          };
-
-          try {
-            const wrappedCode = '(function(console, window, document, alert, confirm, prompt, fetch, XMLHttpRequest, localStorage, sessionStorage) {' +
-              code +
-              '\\n})(fakeConsole, fakeWindow, fakeWindow.document, fakeWindow.alert, fakeWindow.confirm, fakeWindow.prompt, fakeWindow.fetch, fakeWindow.XMLHttpRequest, fakeWindow.localStorage, fakeWindow.sessionStorage);';
-
-            const fn = new Function('fakeConsole', 'fakeWindow', wrappedCode);
-            fn(fakeConsole, fakeWindow);
-
-            self.postMessage({
-              success: true,
-              output: logs.join('\\n'),
-              errors: errors.join('\\n')
-            });
-          } catch(err) {
-            self.postMessage({
-              success: false,
-              output: logs.join('\\n'),
-              errors: err.toString()
-            });
-          }
-        };
-      `;
-
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(workerUrl);
-
-      const timeoutId = setTimeout(() => {
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-        resolve({
-          output: 'Error: Waktu eksekusi habis (Timeout 3 detik).\nKemungkinan kode memiliki perulangan tanpa henti (Infinite Loop).',
-          error: true
-        });
-      }, timeout);
-
-      worker.onmessage = (e) => {
-        clearTimeout(timeoutId);
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-
-        const { success, output, errors } = e.data;
-        if (success) {
-          if (errors) {
-            resolve({ output: output + (output ? '\n' : '') + 'Errors:\n' + errors, error: true });
-          } else {
-            resolve({ output: output || '(Eksekusi berhasil tanpa output)', error: false });
-          }
-        } else {
-          resolve({ output: (output ? output + '\n' : '') + 'Error: ' + errors, error: true });
-        }
-      };
-
-      worker.onerror = (e) => {
-        clearTimeout(timeoutId);
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-        resolve({ output: 'Worker Error: ' + e.message, error: true });
-      };
-
-      worker.postMessage({ code });
-    });
-  };
-
-  function detectCinCount(code: string, lang: string): number {
-    if (lang === 'cpp') return (code.match(/\bcin\s*>>/g) || []).length;
-    if (lang === 'python') return (code.match(/\binput\s*\(/g) || []).length;
-    if (lang === 'php') return (code.match(/\bfgets\s*\(|\breadline\s*\(|\bfscanf\s*\(/g) || []).length;
-    return 0;
-  }
-
-  function extractPromptTexts(code: string, lang: string): string[] {
-    const prompts: string[] = [];
-    if (lang === 'cpp') {
-      const re = /cout\s*<<\s*((?:"[^"]*"|'[^']*'|\s*<<\s*(?:"[^"]*"|'[^']*'))*)\s*;?\s*cin\s*>>/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) {
-        const raw = m[1].replace(/<<\s*/g, '').replace(/\s*endl\b/g, '').replace(/\\n/g, '').replace(/["']/g, '').trim();
-        prompts.push(raw || '');
-      }
-      const cinCount = (code.match(/\bcin\s*>>/g) || []).length;
-      while (prompts.length < cinCount) prompts.push('');
-    } else if (lang === 'python') {
-      const re = /\binput\s*\(\s*(["'])(.*?)\1\s*\)/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) prompts.push(m[2] || '');
-      const inputCount = (code.match(/\binput\s*\(/g) || []).length;
-      while (prompts.length < inputCount) prompts.push('');
-    } else {
-      const count = detectCinCount(code, lang);
-      for (let i = 0; i < count; i++) prompts.push('');
-    }
-    return prompts;
-  }
-
-  function mergeStdinIntoOutput(stdout: string, pairs: { prompt: string; value: string }[]): string {
-    if (!pairs.length) return stdout;
-    let remaining = stdout;
-    const parts: string[] = [];
-    for (const { prompt, value } of pairs) {
-      if (prompt) {
-        const idx = remaining.indexOf(prompt);
-        if (idx !== -1) {
-          if (idx > 0) parts.push(remaining.slice(0, idx));
-          parts.push(prompt + value + '\n');
-          remaining = remaining.slice(idx + prompt.length);
-          continue;
-        }
-      }
-      parts.push(value + '\n');
-    }
-    const tail = remaining.replace(/^\n/, '').trimEnd();
-    if (tail) parts.push(tail);
-    return parts.join('');
-  }
-
-  function buildTerminalOutput(
-    stdout: string, stderr: string, compileErr: string, signal: string | null, httpErr: string | null,
-    pairs: { prompt: string; value: string }[]
-  ): TLine[] {
-    const lines: TLine[] = [];
-    if (httpErr) { lines.push({ text: 'Error: ' + httpErr, type: 'error' }); return lines; }
-    if (compileErr.trim()) { lines.push({ text: compileErr.trim(), type: 'error' }); return lines; }
-    if (signal === 'SIGKILL') { lines.push({ text: 'Program dihentikan paksa (timeout/memory limit). Periksa infinite loop.', type: 'error' }); return lines; }
-    const merged = pairs.length > 0 ? mergeStdinIntoOutput(stdout, pairs) : stdout;
-    const finalOut = merged.trimEnd();
-    if (finalOut) lines.push({ text: finalOut, type: 'output' });
-    if (stderr.trim()) {
-      if (finalOut) lines.push({ text: '', type: 'output' });
-      lines.push({ text: stderr.trim(), type: 'error' });
-    }
-    if (!finalOut && !stderr.trim()) lines.push({ text: '(Program selesai tanpa output)', type: 'system' });
-    return lines;
-  }
-
-  const callRunCodeForQ = async (language: string, code: string, stdin: string) => {
-    const pistonConfig = PISTON_CONFIG[language];
-    if (!pistonConfig) return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: 'Bahasa tidak didukung.' };
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-        body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }], stdin }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) {
-        const msg = res.status === 429 ? 'Terlalu banyak request.' : res.status >= 500 ? 'Server bermasalah.' : `Error ${res.status}`;
-        return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: msg };
-      }
-      const data = await res.json();
-      return {
-        stdout: String(data.run?.stdout || ''), stderr: String(data.run?.stderr || ''),
-        compileErr: String(data.compile?.stderr || ''), signal: data.run?.signal ?? null, httpErr: null,
-      };
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: err.name === 'AbortError' ? 'Timeout.' : (err.message || 'Error.') };
-    }
-  };
-
   const runStudentCode = async (questionId: string, language: string) => {
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
@@ -353,121 +117,24 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
 
     if (language === 'htmlcss') {
       setHtmlPreviews(prev => ({ ...prev, [questionId]: true }));
-      setCodeOutputs(prev => { const n = { ...prev }; delete n[questionId]; return n; });
       return;
     }
 
-    // Reset
     setTermOpen(prev => ({ ...prev, [questionId]: true }));
-    setTermLines(prev => ({ ...prev, [questionId]: [] }));
-    setTermInputs(prev => ({ ...prev, [questionId]: '' }));
-    setAwaitingInput(prev => ({ ...prev, [questionId]: false }));
-    pendingPromptsRef.current[questionId] = [];
-    collectedPairs.current[questionId] = [];
-    setCodeOutputs(prev => { const n = { ...prev }; delete n[questionId]; return n; });
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
+    setTermLines(prev => ({ ...prev, [questionId]: [{ text: '...', type: 'system' }] }));
 
     if (language === 'javascript') {
-      setTermLines(prev => ({ ...prev, [questionId]: [{ text: 'Running JavaScript...', type: 'system' }] }));
       const result = await executeJavaScriptInWorker(code, 3000);
-      setTermLines(prev => ({ ...prev, [questionId]: [
-        { text: 'Running JavaScript...', type: 'system' },
-        { text: result.output, type: result.error ? 'error' : 'output' },
-      ]}));
+      setTermLines(prev => ({ ...prev, [questionId]: [{ text: result.output, type: result.error ? 'error' : 'output' }] }));
       setRunningCode(prev => ({ ...prev, [questionId]: false }));
       return;
     }
 
-    const langLabel = language === 'cpp' ? 'C++' : language;
-    const cinCount = detectCinCount(code, language);
-
-    setTermLines(prev => ({ ...prev, [questionId]: [{ text: `Compiling ${langLabel}...`, type: 'system' }] }));
-    await new Promise(r => setTimeout(r, 300));
-
-    if (cinCount > 0) {
-      const prompts = extractPromptTexts(code, language);
-      pendingPromptsRef.current[questionId] = prompts.slice(1);
-      setTermLines(prev => ({ ...prev, [questionId]: [
-        { text: `Compiling ${langLabel}...`, type: 'system' },
-        { text: 'Running...', type: 'system' },
-        { text: prompts[0], type: 'prompt' },
-      ]}));
-      setAwaitingInput(prev => ({ ...prev, [questionId]: true }));
-      setRunningCode(prev => ({ ...prev, [questionId]: false }));
-      setTimeout(() => termInputRefs.current[questionId]?.focus(), 50);
-    } else {
-      setTermLines(prev => ({ ...prev, [questionId]: [
-        { text: `Compiling ${langLabel}...`, type: 'system' },
-        { text: 'Running...', type: 'system' },
-        { text: '...', type: 'system' },
-      ]}));
-      const result = await callRunCodeForQ(language, code, '');
-      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, []);
-      setTermLines(prev => ({ ...prev, [questionId]: [
-        { text: `Compiling ${langLabel}...`, type: 'system' },
-        { text: 'Running...', type: 'system' },
-        ...outLines,
-        { text: '\n[Program selesai]', type: 'system' },
-      ]}));
-      setRunningCode(prev => ({ ...prev, [questionId]: false }));
-    }
+    const result = await callPiston(language, code, stdinValues[questionId] || '');
+    setTermLines(prev => ({ ...prev, [questionId]: buildTerminalLines(result) }));
+    setRunningCode(prev => ({ ...prev, [questionId]: false }));
   };
-
-  const handleTerminalSubmit = async (e: React.FormEvent, questionId: string, language: string) => {
-    e.preventDefault();
-    const value = termInputs[questionId] || '';
-    const code = session.answers[questionId] || '';
-    const lines = termLines[questionId] || [];
-
-    const currentPrompt = lines.slice().reverse().find(l => l.type === 'prompt')?.text ?? '';
-    collectedPairs.current[questionId] = [...(collectedPairs.current[questionId] || []), { prompt: currentPrompt, value }];
-
-    setTermLines(prev => {
-      const prevLines = prev[questionId] || [];
-      const updated = [...prevLines];
-      const lastPromptIdx = updated.map(l => l.type).lastIndexOf('prompt');
-      if (lastPromptIdx !== -1) {
-        updated[lastPromptIdx] = { text: updated[lastPromptIdx].text + value, type: 'input' };
-      } else {
-        updated.push({ text: value, type: 'input' });
-      }
-      return { ...prev, [questionId]: updated };
-    });
-    setTermInputs(prev => ({ ...prev, [questionId]: '' }));
-
-    const pending = pendingPromptsRef.current[questionId] || [];
-    const allValues = collectedPairs.current[questionId].map(p => p.value);
-
-    if (pending.length > 0) {
-      const next = pending.shift()!;
-      setTermLines(prev => ({ ...prev, [questionId]: [...(prev[questionId] || []), { text: next, type: 'prompt' }] }));
-      setTimeout(() => termInputRefs.current[questionId]?.focus(), 30);
-    } else {
-      setAwaitingInput(prev => ({ ...prev, [questionId]: false }));
-      setRunningCode(prev => ({ ...prev, [questionId]: true }));
-      const stdinString = allValues.join('\n') + '\n';
-      setTermLines(prev => ({ ...prev, [questionId]: [...(prev[questionId] || []), { text: '...', type: 'system' }] }));
-      const result = await callRunCodeForQ(language, code, stdinString);
-      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, collectedPairs.current[questionId] || []);
-      setTermLines(prev => {
-        const filtered = (prev[questionId] || []).filter(l => !(l.text === '...' && l.type === 'system'));
-        return { ...prev, [questionId]: [...filtered, ...outLines, { text: '\n[Program selesai]', type: 'system' }] };
-      });
-      setRunningCode(prev => ({ ...prev, [questionId]: false }));
-    }
-  };
-
-  useLayoutEffect(() => {
-    Object.keys(termEndRefs.current).forEach(qId => {
-      termEndRefs.current[qId]?.scrollIntoView({ behavior: 'smooth' });
-    });
-  }, [termLines, awaitingInput]);
-
-  useEffect(() => {
-    Object.keys(awaitingInput).forEach(qId => {
-      if (awaitingInput[qId]) termInputRefs.current[qId]?.focus();
-    });
-  }, [awaitingInput]);
 
   const handleSaveAllScores = async () => {
     setIsSaving(true);
@@ -761,9 +428,9 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                         {!isHtmlCss ? (
                           <button
                             onClick={() => runStudentCode(q.id, q.language || 'javascript')}
-                            disabled={runningCode[q.id] || awaitingInput[q.id]}
+                            disabled={runningCode[q.id]}
                             className={`flex items-center gap-2 font-bold py-2 px-5 rounded text-sm shadow ${
-                              runningCode[q.id] || awaitingInput[q.id]
+                              runningCode[q.id]
                                 ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                                 : 'bg-emerald-600 hover:bg-emerald-500 text-white'
                             }`}
@@ -793,6 +460,34 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                         )}
                       </div>
 
+                      {!isHtmlCss && q.language !== 'javascript' && (
+                        <div className="rounded-lg overflow-hidden border border-gray-700">
+                          <button
+                            type="button"
+                            onClick={() => setStdinExpanded(prev => ({ ...prev, [q.id]: !prev[q.id] }))}
+                            className="w-full flex items-center justify-between px-3 py-2 bg-[#1a1a1a] text-xs font-mono text-gray-400 hover:text-gray-200 transition-colors"
+                          >
+                            <span>stdin (input program)</span>
+                            <div className="flex items-center gap-2">
+                              {stdinValues[q.id] && (
+                                <span className="text-cyan-400">{stdinValues[q.id].split('\n').length} baris</span>
+                              )}
+                              <span>{stdinExpanded[q.id] ? '▲' : '▼'}</span>
+                            </div>
+                          </button>
+                          {stdinExpanded[q.id] && (
+                            <textarea
+                              value={stdinValues[q.id] || ''}
+                              onChange={e => setStdinValues(prev => ({ ...prev, [q.id]: e.target.value }))}
+                              placeholder={'Contoh:\n1\nToni\nFantasi'}
+                              rows={4}
+                              className="w-full bg-[#111] text-cyan-200 font-mono text-sm px-3 py-2 border-t border-gray-700 outline-none resize-y placeholder-gray-600"
+                              spellCheck={false}
+                            />
+                          )}
+                        </div>
+                      )}
+
                       {termOpen[q.id] && !isHtmlCss && (
                         <div className="mt-3 rounded-lg overflow-hidden border border-gray-700 shadow-xl">
                           <div className="flex items-center justify-between bg-[#1a1a1a] px-4 py-2 border-b border-gray-700">
@@ -814,17 +509,11 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                                   running
                                 </span>
                               )}
-                              {awaitingInput[q.id] && !runningCode[q.id] && (
-                                <span className="text-xs text-cyan-400 font-mono animate-pulse">● stdin</span>
-                              )}
                             </div>
                             <button
                               onClick={() => {
                                 setTermOpen(prev => ({ ...prev, [q.id]: false }));
                                 setTermLines(prev => { const n = { ...prev }; delete n[q.id]; return n; });
-                                setAwaitingInput(prev => ({ ...prev, [q.id]: false }));
-                                pendingPromptsRef.current[q.id] = [];
-                                collectedPairs.current[q.id] = [];
                                 setRunningCode(prev => ({ ...prev, [q.id]: false }));
                               }}
                               className="text-gray-500 hover:text-gray-200 text-xs px-2 py-0.5 rounded hover:bg-gray-700 transition-colors"
@@ -835,7 +524,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                           <div
                             className="bg-[#0d0d0d] font-mono text-sm leading-relaxed overflow-auto"
                             style={{ minHeight: '120px', maxHeight: '300px', padding: '12px 16px' }}
-                            onClick={() => awaitingInput[q.id] && termInputRefs.current[q.id]?.focus()}
                           >
                             {(termLines[q.id] || []).map((line, i) => {
                               const colorClass =
@@ -855,22 +543,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                                 </div>
                               );
                             })}
-                            {awaitingInput[q.id] && (
-                              <form onSubmit={(e) => handleTerminalSubmit(e, q.id, q.language || 'cpp')} className="flex items-center">
-                                <input
-                                  ref={el => { termInputRefs.current[q.id] = el; }}
-                                  type="text"
-                                  value={termInputs[q.id] || ''}
-                                  onChange={e => setTermInputs(prev => ({ ...prev, [q.id]: e.target.value }))}
-                                  className="bg-transparent border-none outline-none text-cyan-200 font-mono text-sm flex-1 caret-cyan-400"
-                                  style={{ minWidth: 0 }}
-                                  autoComplete="off"
-                                  spellCheck={false}
-                                />
-                                <span className="text-cyan-400 animate-[blink_1s_step-end_infinite] ml-0.5 select-none">█</span>
-                              </form>
-                            )}
-                            <div ref={el => { termEndRefs.current[q.id] = el; }} />
                           </div>
                         </div>
                       )}
