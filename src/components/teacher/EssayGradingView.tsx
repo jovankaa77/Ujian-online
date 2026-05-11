@@ -104,16 +104,16 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [htmlActiveTabs, setHtmlActiveTabs] = useState<{ [key: string]: WebTab }>({});
   const [htmlPreviewModes, setHtmlPreviewModes] = useState<{ [key: string]: PreviewMode }>({});
 
-  // Interactive terminal state (keyed by questionId)
-  type TerminalLine = { text: string; type: 'output' | 'input' | 'prompt' };
-  const [terminalLines, setTerminalLines] = useState<{ [key: string]: TerminalLine[] }>({});
-  const [terminalInputs, setTerminalInputs] = useState<{ [key: string]: string }>({});
-  const [pendingStdin, setPendingStdin] = useState<{ [key: string]: string[] }>({});
+  // Terminal state (keyed by questionId)
+  type TLine = { text: string; type: 'system' | 'output' | 'error' | 'input' | 'prompt' };
+  const [termOpen, setTermOpen] = useState<{ [key: string]: boolean }>({});
+  const [termLines, setTermLines] = useState<{ [key: string]: TLine[] }>({});
+  const [termInputs, setTermInputs] = useState<{ [key: string]: string }>({});
   const [awaitingInput, setAwaitingInput] = useState<{ [key: string]: boolean }>({});
+  const pendingPromptsRef = useRef<{ [key: string]: string[] }>({});
   const collectedPairs = useRef<{ [key: string]: { prompt: string; value: string }[] }>({});
-  const terminalInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
-  const terminalBottomRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-  const [focusTrigger, setFocusTrigger] = useState<{ [key: string]: number }>({});
+  const termInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+  const termEndRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
     const newScores = { ...essayScores };
@@ -256,19 +256,19 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       let m: RegExpExecArray | null;
       while ((m = re.exec(code)) !== null) {
         const raw = m[1].replace(/<<\s*/g, '').replace(/\s*endl\b/g, '').replace(/\\n/g, '').replace(/["']/g, '').trim();
-        if (raw) prompts.push(raw);
+        prompts.push(raw || '');
       }
       const cinCount = (code.match(/\bcin\s*>>/g) || []).length;
-      while (prompts.length < cinCount) prompts.push('Input');
+      while (prompts.length < cinCount) prompts.push('');
     } else if (lang === 'python') {
       const re = /\binput\s*\(\s*(["'])(.*?)\1\s*\)/g;
       let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) prompts.push(m[2] || 'Input');
+      while ((m = re.exec(code)) !== null) prompts.push(m[2] || '');
       const inputCount = (code.match(/\binput\s*\(/g) || []).length;
-      while (prompts.length < inputCount) prompts.push('Input');
+      while (prompts.length < inputCount) prompts.push('');
     } else {
       const count = detectCinCount(code, lang);
-      for (let i = 0; i < count; i++) prompts.push('Input');
+      for (let i = 0; i < count; i++) prompts.push('');
     }
     return prompts;
   }
@@ -278,112 +278,76 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     let remaining = stdout;
     const parts: string[] = [];
     for (const { prompt, value } of pairs) {
-      const idx = remaining.indexOf(prompt);
-      if (idx !== -1) {
-        if (idx > 0) parts.push(remaining.slice(0, idx));
-        parts.push(prompt + value + '\n');
-        remaining = remaining.slice(idx + prompt.length);
-      } else {
-        parts.push(value + '\n');
+      if (prompt) {
+        const idx = remaining.indexOf(prompt);
+        if (idx !== -1) {
+          if (idx > 0) parts.push(remaining.slice(0, idx));
+          parts.push(prompt + value + '\n');
+          remaining = remaining.slice(idx + prompt.length);
+          continue;
+        }
       }
+      parts.push(value + '\n');
     }
     const tail = remaining.replace(/^\n/, '').trimEnd();
     if (tail) parts.push(tail);
     return parts.join('');
   }
 
-  const executeCode = async (questionId: string, language: string, code: string, stdin: string, useTerminal: boolean) => {
-    const pistonConfig = PISTON_CONFIG[language];
-    if (!pistonConfig) {
-      const err = { output: 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.', error: true };
-      if (useTerminal) {
-        setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: err.output, type: 'output' }] }));
-      } else {
-        setCodeOutputs(prev => ({ ...prev, [questionId]: err }));
-      }
-      setRunningCode(prev => ({ ...prev, [questionId]: false }));
-      return;
+  function buildTerminalOutput(
+    stdout: string, stderr: string, compileErr: string, signal: string | null, httpErr: string | null,
+    pairs: { prompt: string; value: string }[]
+  ): TLine[] {
+    const lines: TLine[] = [];
+    if (httpErr) { lines.push({ text: 'Error: ' + httpErr, type: 'error' }); return lines; }
+    if (compileErr.trim()) { lines.push({ text: compileErr.trim(), type: 'error' }); return lines; }
+    if (signal === 'SIGKILL') { lines.push({ text: 'Program dihentikan paksa (timeout/memory limit). Periksa infinite loop.', type: 'error' }); return lines; }
+    const merged = pairs.length > 0 ? mergeStdinIntoOutput(stdout, pairs) : stdout;
+    const finalOut = merged.trimEnd();
+    if (finalOut) lines.push({ text: finalOut, type: 'output' });
+    if (stderr.trim()) {
+      if (finalOut) lines.push({ text: '', type: 'output' });
+      lines.push({ text: stderr.trim(), type: 'error' });
     }
+    if (!finalOut && !stderr.trim()) lines.push({ text: '(Program selesai tanpa output)', type: 'system' });
+    return lines;
+  }
 
-    const setOut = (out: { output: string; error: boolean }) => {
-      if (useTerminal) {
-        const pairs = collectedPairs.current[questionId] || [];
-        const rawOut = out.error ? '' : out.output;
-        const merged = pairs.length > 0 ? mergeStdinIntoOutput(rawOut, pairs) : rawOut;
-        const finalOut = out.error ? out.output : (merged || '(Eksekusi berhasil tanpa output)');
-        setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: finalOut, type: 'output' }] }));
-      } else {
-        setCodeOutputs(prev => ({ ...prev, [questionId]: out }));
-      }
-      setRunningCode(prev => ({ ...prev, [questionId]: false }));
-    };
-
+  const callRunCodeForQ = async (language: string, code: string, stdin: string) => {
+    const pistonConfig = PISTON_CONFIG[language];
+    if (!pistonConfig) return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: 'Bahasa tidak didukung.' };
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+      const res = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
         body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }], stdin }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        let errorMsg = 'Error: Server mengembalikan status ' + response.status;
-        if (response.status === 429) errorMsg = 'Error: Terlalu banyak request.';
-        else if (response.status >= 500) errorMsg = 'Error: Server eksekusi bermasalah.';
-        setOut({ output: errorMsg, error: true });
-        return;
+      if (!res.ok) {
+        const msg = res.status === 429 ? 'Terlalu banyak request.' : res.status >= 500 ? 'Server bermasalah.' : `Error ${res.status}`;
+        return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: msg };
       }
-
-      const data = await response.json();
-
-      if (data.compile?.stderr?.trim()) {
-        setOut({ output: 'Compilation Error:\n' + data.compile.stderr, error: true });
-        return;
-      }
-      if (data.run?.signal === 'SIGKILL') {
-        setOut({ output: 'Error: Program dihentikan (timeout/memory limit). Kemungkinan infinite loop.', error: true });
-        return;
-      }
-
-      const hasStderr = data.run?.stderr?.trim();
-      const hasStdout = data.run?.stdout?.trim();
-
-      if (useTerminal) {
-        const rawOut = hasStdout ? String(data.run.stdout) : '';
-        const pairs = collectedPairs.current[questionId] || [];
-        const merged = pairs.length > 0 ? mergeStdinIntoOutput(rawOut, pairs) : rawOut;
-        const finalOut = hasStderr
-          ? (merged ? merged + '\n' : '') + 'Error:\n' + String(data.run.stderr)
-          : (merged || '(Eksekusi berhasil tanpa output)');
-        setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: finalOut, type: 'output' }] }));
-        setRunningCode(prev => ({ ...prev, [questionId]: false }));
-      } else if (hasStderr && hasStdout) {
-        setOut({ output: data.run.stdout + '\n\nWarning:\n' + data.run.stderr, error: false });
-      } else if (hasStderr) {
-        setOut({ output: 'Error:\n' + data.run.stderr, error: true });
-      } else if (hasStdout) {
-        setOut({ output: data.run.stdout, error: false });
-      } else {
-        setOut({ output: '(Eksekusi berhasil tanpa output)', error: false });
-      }
+      const data = await res.json();
+      return {
+        stdout: String(data.run?.stdout || ''), stderr: String(data.run?.stderr || ''),
+        compileErr: String(data.compile?.stderr || ''), signal: data.run?.signal ?? null, httpErr: null,
+      };
     } catch (err: any) {
-      const errorMsg = err.name === 'AbortError'
-        ? 'Error: Timeout. Kemungkinan infinite loop.'
-        : 'Error: ' + (err.message || 'Gagal menjalankan kode');
-      setOut({ output: errorMsg, error: true });
+      clearTimeout(timeoutId);
+      return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: err.name === 'AbortError' ? 'Timeout.' : (err.message || 'Error.') };
     }
   };
 
   const runStudentCode = async (questionId: string, language: string) => {
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
-      setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error: Kode kosong!', error: true } }));
+      setTermOpen(prev => ({ ...prev, [questionId]: true }));
+      setTermLines(prev => ({ ...prev, [questionId]: [{ text: 'Error: Kode kosong!', type: 'error' }] }));
       return;
     }
 
@@ -393,51 +357,72 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       return;
     }
 
-    // Reset terminal state for this question
-    setTerminalLines(prev => { const n = { ...prev }; delete n[questionId]; return n; });
-    setTerminalInputs(prev => ({ ...prev, [questionId]: '' }));
-    setPendingStdin(prev => { const n = { ...prev }; delete n[questionId]; return n; });
+    // Reset
+    setTermOpen(prev => ({ ...prev, [questionId]: true }));
+    setTermLines(prev => ({ ...prev, [questionId]: [] }));
+    setTermInputs(prev => ({ ...prev, [questionId]: '' }));
     setAwaitingInput(prev => ({ ...prev, [questionId]: false }));
+    pendingPromptsRef.current[questionId] = [];
     collectedPairs.current[questionId] = [];
     setCodeOutputs(prev => { const n = { ...prev }; delete n[questionId]; return n; });
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
 
     if (language === 'javascript') {
+      setTermLines(prev => ({ ...prev, [questionId]: [{ text: 'Running JavaScript...', type: 'system' }] }));
       const result = await executeJavaScriptInWorker(code, 3000);
-      setCodeOutputs(prev => ({ ...prev, [questionId]: result }));
+      setTermLines(prev => ({ ...prev, [questionId]: [
+        { text: 'Running JavaScript...', type: 'system' },
+        { text: result.output, type: result.error ? 'error' : 'output' },
+      ]}));
       setRunningCode(prev => ({ ...prev, [questionId]: false }));
       return;
     }
 
+    const langLabel = language === 'cpp' ? 'C++' : language;
     const cinCount = detectCinCount(code, language);
+
+    setTermLines(prev => ({ ...prev, [questionId]: [{ text: `Compiling ${langLabel}...`, type: 'system' }] }));
+    await new Promise(r => setTimeout(r, 300));
+
     if (cinCount > 0) {
       const prompts = extractPromptTexts(code, language);
-      setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: prompts[0] + ': ', type: 'prompt' }] }));
-      setPendingStdin(prev => ({ ...prev, [questionId]: prompts.slice(1) }));
+      pendingPromptsRef.current[questionId] = prompts.slice(1);
+      setTermLines(prev => ({ ...prev, [questionId]: [
+        { text: `Compiling ${langLabel}...`, type: 'system' },
+        { text: 'Running...', type: 'system' },
+        { text: prompts[0], type: 'prompt' },
+      ]}));
       setAwaitingInput(prev => ({ ...prev, [questionId]: true }));
       setRunningCode(prev => ({ ...prev, [questionId]: false }));
-      setFocusTrigger(prev => ({ ...prev, [questionId]: (prev[questionId] || 0) + 1 }));
-      return;
+      setTimeout(() => termInputRefs.current[questionId]?.focus(), 50);
+    } else {
+      setTermLines(prev => ({ ...prev, [questionId]: [
+        { text: `Compiling ${langLabel}...`, type: 'system' },
+        { text: 'Running...', type: 'system' },
+        { text: '...', type: 'system' },
+      ]}));
+      const result = await callRunCodeForQ(language, code, '');
+      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, []);
+      setTermLines(prev => ({ ...prev, [questionId]: [
+        { text: `Compiling ${langLabel}...`, type: 'system' },
+        { text: 'Running...', type: 'system' },
+        ...outLines,
+        { text: '\n[Program selesai]', type: 'system' },
+      ]}));
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
     }
-
-    await executeCode(questionId, language, code, '', false);
   };
 
-  const handleTerminalInputSubmit = async (e: React.FormEvent, questionId: string, language: string) => {
+  const handleTerminalSubmit = async (e: React.FormEvent, questionId: string, language: string) => {
     e.preventDefault();
-    const value = terminalInputs[questionId] || '';
+    const value = termInputs[questionId] || '';
     const code = session.answers[questionId] || '';
+    const lines = termLines[questionId] || [];
 
-    const lines = terminalLines[questionId] || [];
-    const currentPromptLine = lines.slice().reverse().find(l => l.type === 'prompt');
-    const currentPromptText = currentPromptLine ? currentPromptLine.text : '';
+    const currentPrompt = lines.slice().reverse().find(l => l.type === 'prompt')?.text ?? '';
+    collectedPairs.current[questionId] = [...(collectedPairs.current[questionId] || []), { prompt: currentPrompt, value }];
 
-    collectedPairs.current[questionId] = [
-      ...(collectedPairs.current[questionId] || []),
-      { prompt: currentPromptText, value },
-    ];
-
-    setTerminalLines(prev => {
+    setTermLines(prev => {
       const prevLines = prev[questionId] || [];
       const updated = [...prevLines];
       const lastPromptIdx = updated.map(l => l.type).lastIndexOf('prompt');
@@ -448,44 +433,41 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       }
       return { ...prev, [questionId]: updated };
     });
-    setTerminalInputs(prev => ({ ...prev, [questionId]: '' }));
+    setTermInputs(prev => ({ ...prev, [questionId]: '' }));
 
-    const qPending = pendingStdin[questionId] || [];
+    const pending = pendingPromptsRef.current[questionId] || [];
     const allValues = collectedPairs.current[questionId].map(p => p.value);
 
-    if (qPending.length > 0) {
-      const nextPrompt = qPending[0];
-      setTerminalLines(prev => ({
-        ...prev,
-        [questionId]: [...(prev[questionId] || []), { text: nextPrompt + ': ', type: 'prompt' }],
-      }));
-      setPendingStdin(prev => ({ ...prev, [questionId]: qPending.slice(1) }));
-      setFocusTrigger(prev => ({ ...prev, [questionId]: (prev[questionId] || 0) + 1 }));
+    if (pending.length > 0) {
+      const next = pending.shift()!;
+      setTermLines(prev => ({ ...prev, [questionId]: [...(prev[questionId] || []), { text: next, type: 'prompt' }] }));
+      setTimeout(() => termInputRefs.current[questionId]?.focus(), 30);
     } else {
-      const stdinString = allValues.join('\n') + '\n';
       setAwaitingInput(prev => ({ ...prev, [questionId]: false }));
       setRunningCode(prev => ({ ...prev, [questionId]: true }));
-      setTerminalLines(prev => ({
-        ...prev,
-        [questionId]: [...(prev[questionId] || []), { text: 'Menjalankan...', type: 'output' }],
-      }));
-      await executeCode(questionId, language, code, stdinString, true);
+      const stdinString = allValues.join('\n') + '\n';
+      setTermLines(prev => ({ ...prev, [questionId]: [...(prev[questionId] || []), { text: '...', type: 'system' }] }));
+      const result = await callRunCodeForQ(language, code, stdinString);
+      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, collectedPairs.current[questionId] || []);
+      setTermLines(prev => {
+        const filtered = (prev[questionId] || []).filter(l => !(l.text === '...' && l.type === 'system'));
+        return { ...prev, [questionId]: [...filtered, ...outLines, { text: '\n[Program selesai]', type: 'system' }] };
+      });
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
     }
   };
 
   useLayoutEffect(() => {
-    Object.keys(terminalBottomRefs.current).forEach(qId => {
-      terminalBottomRefs.current[qId]?.scrollIntoView({ behavior: 'smooth' });
+    Object.keys(termEndRefs.current).forEach(qId => {
+      termEndRefs.current[qId]?.scrollIntoView({ behavior: 'smooth' });
     });
-  }, [terminalLines]);
+  }, [termLines, awaitingInput]);
 
   useEffect(() => {
-    Object.entries(focusTrigger).forEach(([qId, trigger]) => {
-      if (trigger > 0 && awaitingInput[qId]) {
-        terminalInputRefs.current[qId]?.focus();
-      }
+    Object.keys(awaitingInput).forEach(qId => {
+      if (awaitingInput[qId]) termInputRefs.current[qId]?.focus();
     });
-  }, [focusTrigger, awaitingInput]);
+  }, [awaitingInput]);
 
   const handleSaveAllScores = async () => {
     setIsSaving(true);
@@ -776,84 +758,120 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                   {session.answers[q.id] && (
                     <div className="mt-3">
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => runStudentCode(q.id, q.language || 'javascript')}
-                          disabled={runningCode[q.id] || awaitingInput[q.id]}
-                          className={`font-bold py-2 px-4 rounded ${
-                            runningCode[q.id] || awaitingInput[q.id]
-                              ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                              : 'bg-blue-600 hover:bg-blue-700 text-white'
-                          }`}
-                        >
-                          {runningCode[q.id] ? 'Running...' : (isHtmlCss ? (htmlPreviews[q.id] ? 'Refresh Preview' : 'Preview') : 'Run Code')}
-                        </button>
+                        {!isHtmlCss ? (
+                          <button
+                            onClick={() => runStudentCode(q.id, q.language || 'javascript')}
+                            disabled={runningCode[q.id] || awaitingInput[q.id]}
+                            className={`flex items-center gap-2 font-bold py-2 px-5 rounded text-sm shadow ${
+                              runningCode[q.id] || awaitingInput[q.id]
+                                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            }`}
+                          >
+                            {runningCode[q.id] ? (
+                              <>
+                                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                </svg>
+                                Running...
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+                                Run
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => runStudentCode(q.id, q.language || 'javascript')}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-sm"
+                          >
+                            {htmlPreviews[q.id] ? 'Refresh Preview' : 'Preview'}
+                          </button>
+                        )}
                       </div>
 
-                      {(terminalLines[q.id]?.length > 0 || awaitingInput[q.id]) && (
-                        <div className="mt-3 rounded-lg overflow-hidden border border-gray-600">
-                          <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
-                            <div className="flex items-center gap-2">
-                              <div className={`w-2 h-2 rounded-full ${awaitingInput[q.id] ? 'bg-blue-400 animate-pulse' : runningCode[q.id] ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
-                              <span className="text-sm font-mono text-gray-300">Terminal</span>
-                              {awaitingInput[q.id] && <span className="text-xs text-blue-300 font-mono">— masukkan input</span>}
+                      {termOpen[q.id] && !isHtmlCss && (
+                        <div className="mt-3 rounded-lg overflow-hidden border border-gray-700 shadow-xl">
+                          <div className="flex items-center justify-between bg-[#1a1a1a] px-4 py-2 border-b border-gray-700">
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-red-500 opacity-80" />
+                                <span className="w-3 h-3 rounded-full bg-yellow-500 opacity-80" />
+                                <span className="w-3 h-3 rounded-full bg-green-500 opacity-80" />
+                              </div>
+                              <span className="text-xs font-mono text-gray-400 select-none">
+                                {q.language === 'cpp' ? 'C++ Terminal' : q.language === 'python' ? 'Python Terminal' : 'Terminal'}
+                              </span>
+                              {runningCode[q.id] && (
+                                <span className="flex items-center gap-1 text-xs text-yellow-400 font-mono">
+                                  <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                  </svg>
+                                  running
+                                </span>
+                              )}
+                              {awaitingInput[q.id] && !runningCode[q.id] && (
+                                <span className="text-xs text-cyan-400 font-mono animate-pulse">● stdin</span>
+                              )}
                             </div>
                             <button
                               onClick={() => {
-                                setTerminalLines(prev => { const n = { ...prev }; delete n[q.id]; return n; });
+                                setTermOpen(prev => ({ ...prev, [q.id]: false }));
+                                setTermLines(prev => { const n = { ...prev }; delete n[q.id]; return n; });
                                 setAwaitingInput(prev => ({ ...prev, [q.id]: false }));
-                                setPendingStdin(prev => { const n = { ...prev }; delete n[q.id]; return n; });
+                                pendingPromptsRef.current[q.id] = [];
                                 collectedPairs.current[q.id] = [];
                                 setRunningCode(prev => ({ ...prev, [q.id]: false }));
                               }}
-                              className="text-gray-400 hover:text-white text-xs transition-colors"
+                              className="text-gray-500 hover:text-gray-200 text-xs px-2 py-0.5 rounded hover:bg-gray-700 transition-colors"
                             >
-                              Tutup
+                              ✕
                             </button>
                           </div>
-                          <div className="bg-gray-950 p-4 min-h-[60px] max-h-[260px] overflow-auto font-mono text-sm">
-                            {(terminalLines[q.id] || []).map((line, i) => (
-                              <div key={i} className={`leading-relaxed ${line.type === 'input' ? 'text-white' : line.type === 'prompt' ? 'text-gray-300' : 'text-green-400'}`}>
-                                <span style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>{line.text}</span>
-                              </div>
-                            ))}
+                          <div
+                            className="bg-[#0d0d0d] font-mono text-sm leading-relaxed overflow-auto"
+                            style={{ minHeight: '120px', maxHeight: '300px', padding: '12px 16px' }}
+                            onClick={() => awaitingInput[q.id] && termInputRefs.current[q.id]?.focus()}
+                          >
+                            {(termLines[q.id] || []).map((line, i) => {
+                              const colorClass =
+                                line.type === 'system'  ? 'text-gray-500' :
+                                line.type === 'error'   ? 'text-red-400' :
+                                line.type === 'input'   ? 'text-cyan-300' :
+                                'text-gray-100';
+                              return (
+                                <div key={i} className={colorClass} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                  {line.type === 'system' && line.text === '...' ? (
+                                    <span className="inline-flex gap-1">
+                                      <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                                      <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                                      <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+                                    </span>
+                                  ) : line.text}
+                                </div>
+                              );
+                            })}
                             {awaitingInput[q.id] && (
-                              <form onSubmit={(e) => handleTerminalInputSubmit(e, q.id, q.language || 'cpp')} className="flex items-center">
+                              <form onSubmit={(e) => handleTerminalSubmit(e, q.id, q.language || 'cpp')} className="flex items-center">
                                 <input
-                                  ref={el => { terminalInputRefs.current[q.id] = el; }}
+                                  ref={el => { termInputRefs.current[q.id] = el; }}
                                   type="text"
-                                  value={terminalInputs[q.id] || ''}
-                                  onChange={e => setTerminalInputs(prev => ({ ...prev, [q.id]: e.target.value }))}
-                                  className="bg-transparent border-none outline-none text-white font-mono text-sm flex-1 caret-white"
+                                  value={termInputs[q.id] || ''}
+                                  onChange={e => setTermInputs(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                  className="bg-transparent border-none outline-none text-cyan-200 font-mono text-sm flex-1 caret-cyan-400"
                                   style={{ minWidth: 0 }}
                                   autoComplete="off"
                                   spellCheck={false}
                                 />
-                                <span className="text-white animate-pulse ml-0.5">|</span>
+                                <span className="text-cyan-400 animate-[blink_1s_step-end_infinite] ml-0.5 select-none">█</span>
                               </form>
                             )}
-                            <div ref={el => { terminalBottomRefs.current[q.id] = el; }} />
+                            <div ref={el => { termEndRefs.current[q.id] = el; }} />
                           </div>
-                        </div>
-                      )}
-
-                      {codeOutputs[q.id] && (
-                        <div className={`mt-3 p-4 rounded-md border ${codeOutputs[q.id].error ? 'bg-red-900 border-red-500' : 'bg-gray-900 border-gray-600'}`}>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-bold text-gray-300">Output:</span>
-                            <button
-                              onClick={() => setCodeOutputs(prev => {
-                                const newOutputs = { ...prev };
-                                delete newOutputs[q.id];
-                                return newOutputs;
-                              })}
-                              className="text-gray-400 hover:text-white text-sm"
-                            >
-                              Tutup
-                            </button>
-                          </div>
-                          <pre className={`text-sm font-mono whitespace-pre-wrap ${codeOutputs[q.id].error ? 'text-red-300' : 'text-green-300'}`}>
-                            {codeOutputs[q.id].output}
-                          </pre>
                         </div>
                       )}
 

@@ -469,6 +469,15 @@ interface LiveCodeEditorProps {
   codeMessage: { text: string; type: 'success' | 'error' | 'warning' } | undefined;
 }
 
+// Terminal line types:
+// 'system'  — dim gray  — compile/run commands like "$ g++ ..."
+// 'output'  — white     — program stdout
+// 'error'   — red       — errors/stderr
+// 'input'   — cyan      — echoed user input (after submission)
+// 'prompt'  — white     — live prompt text waiting for input (rendered inline with input field)
+type TermLineType = 'system' | 'output' | 'error' | 'input' | 'prompt';
+interface TermLine { text: string; type: TermLineType }
+
 export default function LiveCodeEditor({
   questionId,
   language,
@@ -483,21 +492,22 @@ export default function LiveCodeEditor({
   codeMessage,
 }: LiveCodeEditorProps) {
   const editorRef = useRef<any>(null);
-  const [codeOutput, setCodeOutput] = useState<{ output: string; error: boolean } | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
-  // Interactive terminal state for cin/input
-  const [terminalLines, setTerminalLines] = useState<{ text: string; type: 'output' | 'input' | 'prompt' }[]>([]);
-  const [terminalInput, setTerminalInput] = useState('');
-  const [pendingStdin, setPendingStdin] = useState<string[]>([]);
+  // ── Terminal state ──────────────────────────────────────────────
+  const [termOpen, setTermOpen] = useState(false);
+  const [termLines, setTermLines] = useState<TermLine[]>([]);
   const [awaitingInput, setAwaitingInput] = useState(false);
-  const [stdinCollected, setStdinCollected] = useState<string | null>(null);
-  // Store [prompt, value] pairs for the merge step
+  const [termInput, setTermInput] = useState('');
+  // Remaining prompt texts queued for collection
+  const pendingPrompts = useRef<string[]>([]);
+  // Accumulated [prompt, value] pairs for final merge
   const collectedPairs = useRef<{ prompt: string; value: string }[]>([]);
-  const terminalInputRef = useRef<HTMLInputElement>(null);
-  const terminalBottomRef = useRef<HTMLDivElement>(null);
+  const termInputRef = useRef<HTMLInputElement>(null);
+  const termEndRef = useRef<HTMLDivElement>(null);
+  // ────────────────────────────────────────────────────────────────
 
   const isWebMode = language === 'htmlcss';
   const isJavaScript = language === 'javascript';
@@ -548,31 +558,21 @@ export default function LiveCodeEditor({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Auto-scroll terminal to bottom
   useLayoutEffect(() => {
-    if (terminalBottomRef.current) {
-      terminalBottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [terminalLines, awaitingInput]);
+    termEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [termLines, awaitingInput]);
 
+  // Focus input when awaiting
   useEffect(() => {
-    if (awaitingInput && terminalInputRef.current) {
-      terminalInputRef.current.focus();
-    }
+    if (awaitingInput) termInputRef.current?.focus();
   }, [awaitingInput]);
 
+  // ── Helpers ─────────────────────────────────────────────────────
   function detectCinCount(code: string, lang: string): number {
-    if (lang === 'cpp') {
-      const matches = code.match(/\bcin\s*>>/g);
-      return matches ? matches.length : 0;
-    }
-    if (lang === 'python') {
-      const matches = code.match(/\binput\s*\(/g);
-      return matches ? matches.length : 0;
-    }
-    if (lang === 'php') {
-      const matches = code.match(/\bfgets\s*\(|\breadline\s*\(|\bfscanf\s*\(/g);
-      return matches ? matches.length : 0;
-    }
+    if (lang === 'cpp') return (code.match(/\bcin\s*>>/g) || []).length;
+    if (lang === 'python') return (code.match(/\binput\s*\(/g) || []).length;
+    if (lang === 'php') return (code.match(/\bfgets\s*\(|\breadline\s*\(|\bfscanf\s*\(/g) || []).length;
     return 0;
   }
 
@@ -583,62 +583,59 @@ export default function LiveCodeEditor({
       let m: RegExpExecArray | null;
       while ((m = re.exec(code)) !== null) {
         const raw = m[1].replace(/<<\s*/g, '').replace(/\s*endl\b/g, '').replace(/\\n/g, '').replace(/["']/g, '').trim();
-        if (raw) prompts.push(raw);
+        prompts.push(raw || '');
       }
       const cinCount = (code.match(/\bcin\s*>>/g) || []).length;
-      while (prompts.length < cinCount) prompts.push('Input');
+      while (prompts.length < cinCount) prompts.push('');
     } else if (lang === 'python') {
       const re = /\binput\s*\(\s*(["'])(.*?)\1\s*\)/g;
       let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) {
-        prompts.push(m[2] || 'Input');
-      }
+      while ((m = re.exec(code)) !== null) prompts.push(m[2] || '');
       const inputCount = (code.match(/\binput\s*\(/g) || []).length;
-      while (prompts.length < inputCount) prompts.push('Input');
+      while (prompts.length < inputCount) prompts.push('');
     } else {
       const count = detectCinCount(code, lang);
-      for (let i = 0; i < count; i++) prompts.push('Input');
+      for (let i = 0; i < count; i++) prompts.push('');
     }
     return prompts;
   }
 
-  // Reconstruct a realistic terminal view by interleaving stdin echo into stdout.
-  // Piston captures stdout (cout) but does not echo stdin (cin). We must insert the
-  // typed values back at the points where the program read them.
-  //
-  // We use the known prompt texts and their values (from collectedPairs.current)
-  // to find exact positions in the stdout string and insert inputs inline.
-  //
-  // Example stdout: "Masukkan a: Masukkan b: Hasil: 8\n"
-  // pairs: [{prompt:"Masukkan a: ", value:"5"}, {prompt:"Masukkan b: ", value:"3"}]
-  // Result: "Masukkan a: 5\nMasukkan b: 3\nHasil: 8"
+  // Merge typed values back into stdout to produce realistic terminal output.
+  // Piston doesn't echo stdin — we reconstruct by finding each prompt string in
+  // stdout and appending the typed value right after it on the same line.
   function mergeStdinIntoOutput(stdout: string, pairs: { prompt: string; value: string }[]): string {
     if (!pairs.length) return stdout;
-
     let remaining = stdout;
     const parts: string[] = [];
-
     for (const { prompt, value } of pairs) {
-      const idx = remaining.indexOf(prompt);
-      if (idx !== -1) {
-        if (idx > 0) {
-          // Content before this prompt (e.g., output from previous iteration)
-          parts.push(remaining.slice(0, idx));
+      if (prompt) {
+        const idx = remaining.indexOf(prompt);
+        if (idx !== -1) {
+          if (idx > 0) parts.push(remaining.slice(0, idx));
+          parts.push(prompt + value + '\n');
+          remaining = remaining.slice(idx + prompt.length);
+          continue;
         }
-        parts.push(prompt + value + '\n');
-        remaining = remaining.slice(idx + prompt.length);
-      } else {
-        // Prompt not found in stdout (e.g., no prompt before cin) — just echo the value
-        parts.push(value + '\n');
       }
+      // No prompt text or not found — just echo the value on its own line
+      parts.push(value + '\n');
     }
-
-    // Remaining stdout after all inputs (e.g., the final result line)
     const tail = remaining.replace(/^\n/, '').trimEnd();
     if (tail) parts.push(tail);
-
     return parts.join('');
   }
+
+  function addLines(lines: TermLine[]) {
+    setTermLines(prev => [...prev, ...lines]);
+  }
+
+  function replaceLoadingLine(lines: TermLine[]) {
+    setTermLines(prev => {
+      const filtered = prev.filter(l => l.text !== '...');
+      return [...filtered, ...lines];
+    });
+  }
+  // ────────────────────────────────────────────────────────────────
 
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
@@ -674,199 +671,203 @@ export default function LiveCodeEditor({
     return 'javascript';
   };
 
-  // useTerminal=true: append result into terminalLines (for cin flows)
-  // useTerminal=false: set codeOutput directly (for no-cin flows)
-  const executeWithStdin = useCallback(async (code: string, stdin: string, useTerminal: boolean = false) => {
+  // ── Core execute call ────────────────────────────────────────────
+  const callRunCode = useCallback(async (code: string, stdin: string): Promise<{
+    stdout: string; stderr: string; compileErr: string; signal: string | null; httpErr: string | null;
+  }> => {
     const pistonConfig = PISTON_CONFIG[language];
-    if (!pistonConfig) {
-      const errOut = { output: 'Error: Bahasa pemrograman tidak didukung.', error: true };
-      if (useTerminal) setTerminalLines(prev => [...prev.filter(l => l.text !== 'Menjalankan...'), { text: errOut.output, type: 'output' as const }]);
-      else setCodeOutput(errOut);
-      setIsRunning(false);
-      return;
-    }
+    if (!pistonConfig) return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: 'Bahasa tidak didukung.' };
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+      const res = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-        body: JSON.stringify({
-          language: pistonConfig.language,
-          version: pistonConfig.version,
-          files: [{ content: code }],
-          stdin,
-        }),
+        body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }], stdin }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-
-      const setOut = (out: { output: string; error: boolean }) => {
-        if (useTerminal) {
-          setTerminalLines(prev => {
-            const filtered = prev.filter(l => l.text !== 'Menjalankan...');
-            return [...filtered, { text: out.output, type: 'output' as const }];
-          });
-        } else {
-          setCodeOutput(out);
-        }
+      if (!res.ok) {
+        const msg = res.status === 429 ? 'Terlalu banyak request, tunggu sebentar.'
+          : res.status >= 500 ? 'Server eksekusi sedang bermasalah.'
+          : `Server error ${res.status}`;
+        return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: msg };
+      }
+      const data = await res.json();
+      return {
+        stdout: String(data.run?.stdout || ''),
+        stderr: String(data.run?.stderr || ''),
+        compileErr: String(data.compile?.stderr || ''),
+        signal: data.run?.signal ?? null,
+        httpErr: null,
       };
-
-      if (!response.ok) {
-        let errorMsg = 'Error: Server mengembalikan status ' + response.status;
-        if (response.status === 429) errorMsg = 'Error: Terlalu banyak request. Harap tunggu beberapa detik.';
-        else if (response.status === 504 || response.status === 408) errorMsg = 'Error: Waktu eksekusi habis. Periksa apakah ada infinite loop.';
-        else if (response.status >= 500) errorMsg = 'Error: Server eksekusi sedang bermasalah.';
-        setOut({ output: errorMsg, error: true });
-        setIsRunning(false);
-        return;
-      }
-
-      const data = await response.json();
-
-      if (data.compile?.stderr?.trim()) {
-        setOut({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
-        setIsRunning(false);
-        return;
-      }
-      if (data.run?.signal === 'SIGKILL') {
-        setOut({ output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan terjadi infinite loop atau recursion tanpa batas.\nPeriksa kembali logika perulangan/rekursi Anda.', error: true });
-        setIsRunning(false);
-        return;
-      }
-
-      const hasStderr = data.run?.stderr?.trim();
-      const hasStdout = data.run?.stdout?.trim();
-
-      if (useTerminal) {
-        // Replace the entire terminal with a merged realistic view:
-        // stdin values are echoed inline with their cout prompts.
-        const rawOut = hasStdout ? String(data.run.stdout) : '';
-        const pairs = collectedPairs.current;
-        const merged = pairs.length > 0 ? mergeStdinIntoOutput(rawOut, pairs) : rawOut;
-        const hasErr = !!hasStderr;
-        const finalOut = hasErr
-          ? (merged ? merged + '\n' : '') + 'Error:\n' + String(data.run.stderr)
-          : (merged || '(Eksekusi berhasil tanpa output)');
-        setTerminalLines([{ text: finalOut, type: 'output' as const }]);
-      } else if (hasStderr && hasStdout) {
-        setOut({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
-      } else if (hasStderr) {
-        setOut({ output: 'Error:\n' + String(data.run.stderr), error: true });
-      } else if (hasStdout) {
-        setOut({ output: String(data.run.stdout), error: false });
-      } else {
-        setOut({ output: '(Eksekusi berhasil tanpa output)', error: false });
-      }
-      setIsRunning(false);
     } catch (err: any) {
-      const out = err.name === 'AbortError'
-        ? { output: 'Error: Waktu eksekusi habis (timeout 15 detik).\nKemungkinan terjadi infinite loop. Periksa kembali logika perulangan Anda.', error: true }
-        : err.name === 'TypeError'
-        ? { output: 'Error: Tidak dapat terhubung ke server. Pastikan koneksi internet Anda aktif.', error: true }
-        : { output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'), error: true };
-      if (useTerminal) {
-        setTerminalLines(prev => [...prev.filter(l => l.text !== 'Menjalankan...'), { text: out.output, type: 'output' as const }]);
-      } else {
-        setCodeOutput(out);
-      }
-      setIsRunning(false);
+      clearTimeout(timeoutId);
+      const msg = err.name === 'AbortError' ? 'Timeout (20 detik). Kemungkinan infinite loop.'
+        : err.name === 'TypeError' ? 'Tidak dapat terhubung ke server.'
+        : err.message || 'Terjadi kesalahan tidak diketahui.';
+      return { stdout: '', stderr: '', compileErr: '', signal: null, httpErr: msg };
     }
   }, [language]);
 
-  const runCode = useCallback(async () => {
-    if (isWebMode) {
-      setHtmlPreview(true);
-      setCodeOutput(null);
-      return;
+  // ── Build final terminal output after execution ──────────────────
+  const buildTerminalOutput = useCallback((
+    stdout: string,
+    stderr: string,
+    compileErr: string,
+    signal: string | null,
+    httpErr: string | null,
+    pairs: { prompt: string; value: string }[]
+  ): TermLine[] => {
+    const lines: TermLine[] = [];
+    if (httpErr) {
+      lines.push({ text: 'Error: ' + httpErr, type: 'error' });
+      return lines;
     }
+    if (compileErr.trim()) {
+      lines.push({ text: compileErr.trim(), type: 'error' });
+      return lines;
+    }
+    if (signal === 'SIGKILL') {
+      lines.push({ text: 'Program dihentikan paksa (timeout / memory limit). Periksa infinite loop.', type: 'error' });
+      return lines;
+    }
+    const merged = pairs.length > 0 ? mergeStdinIntoOutput(stdout, pairs) : stdout;
+    const finalOut = merged.trimEnd();
+    if (finalOut) lines.push({ text: finalOut, type: 'output' });
+    if (stderr.trim()) {
+      if (finalOut) lines.push({ text: '', type: 'output' });
+      lines.push({ text: stderr.trim(), type: 'error' });
+    }
+    if (!finalOut && !stderr.trim()) {
+      lines.push({ text: '(Program selesai tanpa output)', type: 'system' });
+    }
+    return lines;
+  }, []);
+
+  // ── Main run handler ─────────────────────────────────────────────
+  const runCode = useCallback(async () => {
+    if (isWebMode) { setHtmlPreview(true); return; }
 
     const code = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
     if (!code.trim()) {
-      setCodeOutput({ output: 'Error: Kode kosong!', error: true });
+      setTermOpen(true);
+      setTermLines([{ text: 'Error: Kode kosong!', type: 'error' }]);
       return;
     }
 
-    setCodeOutput(null);
-    setTerminalLines([]);
-    setTerminalInput('');
-    setPendingStdin([]);
+    // Reset terminal
+    setTermOpen(true);
+    setTermLines([]);
+    setTermInput('');
     setAwaitingInput(false);
-    setStdinCollected(null);
+    pendingPrompts.current = [];
     collectedPairs.current = [];
     setIsRunning(true);
 
     if (isJavaScript) {
-      setCodeOutput({ output: 'Menjalankan kode...', error: false });
+      setTermLines([{ text: 'Running JavaScript...', type: 'system' }]);
       const result = await executeJavaScriptInWorker(code, 3000);
-      setCodeOutput(result);
+      setTermLines([
+        { text: 'Running JavaScript...', type: 'system' },
+        { text: result.output, type: result.error ? 'error' : 'output' },
+      ]);
       setIsRunning(false);
       return;
     }
 
     const pistonConfig = PISTON_CONFIG[language];
-    if (pistonConfig) {
-      const cinCount = detectCinCount(code, language);
-      if (cinCount > 0) {
-        const prompts = extractPromptTexts(code, language);
-        setTerminalLines([{ text: prompts[0] + ': ', type: 'prompt' }]);
-        setAwaitingInput(true);
-        setPendingStdin(prompts.slice(1));
-        setIsRunning(false);
-        return;
-      }
-      setCodeOutput({ output: 'Menjalankan kode...', error: false });
-      await executeWithStdin(code, '');
+    if (!pistonConfig) {
+      setTermLines([{ text: 'Bahasa tidak didukung.', type: 'error' }]);
+      setIsRunning(false);
       return;
     }
 
-    setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
-    setIsRunning(false);
-  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language, executeWithStdin]);
+    const langLabel = language === 'cpp' ? 'C++' : language;
+    const cinCount = detectCinCount(code, language);
 
-  const handleTerminalInputSubmit = useCallback(async (e: React.FormEvent) => {
+    // Show compile animation
+    setTermLines([{ text: `Compiling ${langLabel}...`, type: 'system' }]);
+    await new Promise(r => setTimeout(r, 300));
+
+    if (cinCount > 0) {
+      // Needs input — collect before running
+      const prompts = extractPromptTexts(code, language);
+      pendingPrompts.current = prompts.slice(1);
+      setTermLines([
+        { text: `Compiling ${langLabel}...`, type: 'system' },
+        { text: `Running...`, type: 'system' },
+        { text: prompts[0], type: 'prompt' },
+      ]);
+      setAwaitingInput(true);
+      setIsRunning(false);
+    } else {
+      // No input needed — run directly
+      setTermLines([
+        { text: `Compiling ${langLabel}...`, type: 'system' },
+        { text: `Running...`, type: 'system' },
+        { text: '...', type: 'system' },
+      ]);
+      const result = await callRunCode(code, '');
+      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, []);
+      setTermLines([
+        { text: `Compiling ${langLabel}...`, type: 'system' },
+        { text: `Running...`, type: 'system' },
+        ...outLines,
+      ]);
+      setIsRunning(false);
+    }
+  }, [isWebMode, isJavaScript, currentDraft, savedAnswer, language, callRunCode, buildTerminalOutput]);
+
+  // ── Handle stdin submission ──────────────────────────────────────
+  const handleTerminalSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    const value = terminalInput;
+    const value = termInput;
     const code = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
 
-    // Find the current prompt text from the last 'prompt' line
-    const currentPromptLine = terminalLines.slice().reverse().find(l => l.type === 'prompt');
-    const currentPromptText = currentPromptLine ? currentPromptLine.text : '';
-
-    // Record the pair for merging later
-    collectedPairs.current = [...collectedPairs.current, { prompt: currentPromptText, value }];
-
-    // Update display: replace prompt line with prompt+value (as 'input' line)
-    setTerminalLines(prev => {
+    // Grab current prompt text from last 'prompt' line
+    setTermLines(prev => {
+      const lastPromptIdx = [...prev].map(l => l.type).lastIndexOf('prompt');
+      if (lastPromptIdx === -1) return [...prev, { text: value, type: 'input' as TermLineType }];
       const updated = [...prev];
-      const lastPromptIdx = updated.map(l => l.type).lastIndexOf('prompt');
-      if (lastPromptIdx !== -1) {
-        updated[lastPromptIdx] = { text: updated[lastPromptIdx].text + value, type: 'input' };
-      } else {
-        updated.push({ text: value, type: 'input' });
-      }
+      // Echo: prompt text + typed value on same line as 'input'
+      updated[lastPromptIdx] = { text: updated[lastPromptIdx].text + value, type: 'input' };
       return updated;
     });
-    setTerminalInput('');
+    setTermInput('');
 
-    const allValues = collectedPairs.current.map(p => p.value);
+    collectedPairs.current = [
+      ...collectedPairs.current,
+      {
+        prompt: termLines.slice().reverse().find(l => l.type === 'prompt')?.text ?? '',
+        value,
+      },
+    ];
 
-    if (pendingStdin.length > 0) {
-      const nextPrompt = pendingStdin[0];
-      setTerminalLines(prev => [...prev, { text: nextPrompt + ': ', type: 'prompt' }]);
-      setPendingStdin(prev => prev.slice(1));
+    if (pendingPrompts.current.length > 0) {
+      const next = pendingPrompts.current.shift()!;
+      setTermLines(prev => [...prev, { text: next, type: 'prompt' }]);
     } else {
-      const stdinString = allValues.join('\n') + '\n';
-      setStdinCollected(stdinString);
+      // All inputs collected — execute
       setAwaitingInput(false);
       setIsRunning(true);
-      setTerminalLines(prev => [...prev, { text: 'Menjalankan...', type: 'output' }]);
-      await executeWithStdin(code, stdinString, true);
+      const stdinString = collectedPairs.current.map(p => p.value).join('\n') + '\n';
+      addLines([{ text: '...', type: 'system' }]);
+
+      const langLabel = language === 'cpp' ? 'C++' : language;
+      const result = await callRunCode(code, stdinString);
+      const outLines = buildTerminalOutput(result.stdout, result.stderr, result.compileErr, result.signal, result.httpErr, collectedPairs.current);
+      setTermLines(prev => {
+        const filtered = prev.filter(l => l.text !== '...' || l.type !== 'system');
+        return [...filtered, ...outLines];
+      });
+      setIsRunning(false);
+      // Show exit line
+      setTermLines(prev => [...prev, { text: `\n[Program selesai, exit code 0]`, type: 'system' }]);
     }
-  }, [terminalInput, terminalLines, pendingStdin, currentDraft, savedAnswer, executeWithStdin]);
+  }, [termInput, termLines, language, currentDraft, savedAnswer, callRunCode, buildTerminalOutput]);
 
   const monacoLang = MONACO_LANGUAGE_MAP[language] || 'plaintext';
   const showPreviewPanel = isWebMode && htmlPreview;
@@ -998,7 +999,7 @@ export default function LiveCodeEditor({
         </div>
       )}
 
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap items-center">
         <button
           onClick={() => onSave(questionId)}
           className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors text-sm"
@@ -1011,17 +1012,42 @@ export default function LiveCodeEditor({
         >
           Batalkan Perubahan
         </button>
-        <button
-          onClick={runCode}
-          disabled={isRunning}
-          className={`font-bold py-2 px-4 rounded transition-colors text-sm ${
-            isRunning
-              ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-        >
-          {isRunning ? 'Running...' : (isWebMode ? (htmlPreview ? 'Refresh Preview' : 'Preview') : 'Run Code')}
-        </button>
+        {!isWebMode && (
+          <button
+            onClick={runCode}
+            disabled={isRunning || awaitingInput}
+            className={`flex items-center gap-2 font-bold py-2 px-5 rounded transition-all text-sm shadow ${
+              isRunning || awaitingInput
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white'
+            }`}
+          >
+            {isRunning ? (
+              <>
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                Running...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5,3 19,12 5,21"/>
+                </svg>
+                Run
+              </>
+            )}
+          </button>
+        )}
+        {isWebMode && (
+          <button
+            onClick={runCode}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors text-sm"
+          >
+            {htmlPreview ? 'Refresh Preview' : 'Preview'}
+          </button>
+        )}
       </div>
 
       {codeMessage && (
@@ -1063,72 +1089,95 @@ export default function LiveCodeEditor({
         </div>
       )}
 
-      {(terminalLines.length > 0 || awaitingInput) && !isWebMode && (
-        <div className="rounded-lg overflow-hidden border border-gray-600">
-          <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${awaitingInput ? 'bg-blue-400 animate-pulse' : isRunning ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
-              <span className="text-sm font-mono text-gray-300">Terminal</span>
-              {awaitingInput && <span className="text-xs text-blue-300 font-mono">— menunggu input</span>}
+      {termOpen && !isWebMode && (
+        <div className="rounded-lg overflow-hidden border border-gray-700 shadow-xl">
+          {/* Terminal header — mimics OnlineGDB */}
+          <div className="flex items-center justify-between bg-[#1a1a1a] px-4 py-2 border-b border-gray-700">
+            <div className="flex items-center gap-3">
+              {/* macOS-style traffic lights */}
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-500 opacity-80" />
+                <span className="w-3 h-3 rounded-full bg-yellow-500 opacity-80" />
+                <span className="w-3 h-3 rounded-full bg-green-500 opacity-80" />
+              </div>
+              <span className="text-xs font-mono text-gray-400 select-none">
+                {language === 'cpp' ? 'C++ Terminal' : language === 'python' ? 'Python Terminal' : 'Terminal'}
+              </span>
+              {isRunning && (
+                <span className="flex items-center gap-1 text-xs text-yellow-400 font-mono">
+                  <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  running
+                </span>
+              )}
+              {awaitingInput && !isRunning && (
+                <span className="text-xs text-cyan-400 font-mono animate-pulse">● stdin</span>
+              )}
             </div>
             <button
-              onClick={() => { setTerminalLines([]); setAwaitingInput(false); setPendingStdin([]); setStdinCollected(null); collectedPairs.current = []; setIsRunning(false); }}
-              className="text-gray-400 hover:text-white text-xs transition-colors"
+              onClick={() => {
+                setTermOpen(false);
+                setTermLines([]);
+                setTermInput('');
+                setAwaitingInput(false);
+                pendingPrompts.current = [];
+                collectedPairs.current = [];
+                setIsRunning(false);
+              }}
+              className="text-gray-500 hover:text-gray-200 transition-colors text-xs px-2 py-0.5 rounded hover:bg-gray-700"
+              title="Tutup terminal"
             >
-              Tutup
+              ✕
             </button>
           </div>
-          <div className="bg-gray-950 p-4 min-h-[80px] max-h-[300px] overflow-auto font-mono text-sm">
-            {terminalLines.map((line, i) => (
-              <div key={i} className={`leading-relaxed ${line.type === 'input' ? 'text-white' : line.type === 'prompt' ? 'text-gray-300' : 'text-green-400'}`}>
-                {line.type === 'prompt' ? (
-                  <span className="text-gray-300">{line.text}</span>
-                ) : (
-                  <span style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>{line.text}</span>
-                )}
-              </div>
-            ))}
+
+          {/* Terminal body */}
+          <div
+            className="bg-[#0d0d0d] font-mono text-sm leading-relaxed overflow-auto"
+            style={{ minHeight: '160px', maxHeight: '340px', padding: '12px 16px' }}
+            onClick={() => awaitingInput && termInputRef.current?.focus()}
+          >
+            {termLines.map((line, i) => {
+              const colorClass =
+                line.type === 'system'  ? 'text-gray-500' :
+                line.type === 'error'   ? 'text-red-400' :
+                line.type === 'input'   ? 'text-cyan-300' :
+                line.type === 'prompt'  ? 'text-gray-100' :
+                'text-gray-100';
+              return (
+                <div key={i} className={colorClass} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {line.type === 'system' && line.text === '...' ? (
+                    <span className="inline-flex gap-1">
+                      <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                      <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                      <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+                    </span>
+                  ) : line.text}
+                </div>
+              );
+            })}
+
+            {/* Inline input row — appears right after the last prompt line */}
             {awaitingInput && (
-              <form onSubmit={handleTerminalInputSubmit} className="flex items-center">
+              <form onSubmit={handleTerminalSubmit} className="flex items-center mt-0">
                 <input
-                  ref={terminalInputRef}
+                  ref={termInputRef}
                   type="text"
-                  value={terminalInput}
-                  onChange={e => setTerminalInput(e.target.value)}
-                  className="bg-transparent border-none outline-none text-white font-mono text-sm flex-1 caret-white"
+                  value={termInput}
+                  onChange={e => setTermInput(e.target.value)}
+                  className="bg-transparent border-none outline-none text-cyan-200 font-mono text-sm flex-1 caret-cyan-400"
                   style={{ minWidth: 0 }}
                   autoComplete="off"
                   spellCheck={false}
+                  placeholder=""
                 />
-                <span className="text-white animate-pulse ml-0.5">|</span>
+                <span className="text-cyan-400 animate-[blink_1s_step-end_infinite] ml-0.5 select-none">█</span>
               </form>
             )}
-            <div ref={terminalBottomRef} />
-          </div>
-        </div>
-      )}
 
-      {codeOutput && !isWebMode && (
-        <div className="rounded-lg overflow-hidden border border-gray-600">
-          <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-yellow-400 animate-pulse' : codeOutput.error ? 'bg-red-400' : 'bg-green-400'}`} />
-              <span className="text-sm font-mono text-gray-300">Terminal Output</span>
-            </div>
-            <button
-              onClick={() => setCodeOutput(null)}
-              className="text-gray-400 hover:text-white text-xs transition-colors"
-            >
-              Tutup
-            </button>
-          </div>
-          <div className="bg-gray-950 p-4 min-h-[80px] max-h-[300px] overflow-auto">
-            <div
-              className={`text-sm font-mono leading-relaxed ${codeOutput.error ? 'text-red-400' : 'text-green-400'}`}
-              style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}
-            >
-              {codeOutput.output}
-            </div>
+            <div ref={termEndRef} />
           </div>
         </div>
       )}
