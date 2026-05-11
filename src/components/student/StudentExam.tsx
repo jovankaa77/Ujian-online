@@ -1067,28 +1067,25 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Prevent right-click and common shortcuts
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      handleViolation("Right Click Attempt");
+      // Right click is blocked but not counted as a violation
     };
     
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Block common cheating shortcuts
+      // Block common cheating shortcuts (copy/paste are allowed)
       if (
-        e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 't' || e.key === 'n' || e.key === 'w') ||
+        e.ctrlKey && (e.key === 't' || e.key === 'n' || e.key === 'w') ||
         e.key === 'F12' ||
         e.key === 'F11' || // Block F11 fullscreen toggle
         e.key === 'Escape' || // Block Escape key (exits fullscreen)
         (e.ctrlKey && e.shiftKey && e.key === 'I') ||
         (e.ctrlKey && e.shiftKey && e.key === 'J') ||
         (e.ctrlKey && e.key === 'u') ||
-
         (e.key === 'PrintScreen') || // Block screenshot
         e.altKey && e.key === 'Tab'
       ) {
         e.preventDefault();
         if (e.key === 'PrintScreen') {
           handleViolation("Screenshot Attempt");
-        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'v')) {
-          handleViolation("Copy/Paste Attempt");
         } else {
           handleViolation("Prohibited Shortcut");
         }
