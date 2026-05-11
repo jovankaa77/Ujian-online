@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, updateDoc, doc, query, limit, startAfter, orderBy, DocumentSnapshot, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, doc, deleteDoc, query, where, limit, startAfter, orderBy, DocumentSnapshot, onSnapshot } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import Modal from '../ui/Modal';
 
@@ -35,6 +35,8 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
   const [editingApplication, setEditingApplication] = useState<Application | null>(null);
   const [newStatus, setNewStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [confirmDeleteApp, setConfirmDeleteApp] = useState<Application | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
 
   const handleBackNavigation = () => {
     navigateBack();
@@ -199,6 +201,34 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
     });
   };
 
+  const handleDeleteStudent = async (app: Application) => {
+    setIsDeletingStudent(true);
+    try {
+      // 1. Delete the application document
+      await deleteDoc(doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/applications`, app.id));
+
+      // 2. Delete session documents for this student
+      const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+      const sessionsSnap = await getDocs(query(sessionsRef, where('studentId', '==', app.studentId)));
+      await Promise.all(sessionsSnap.docs.map(d => deleteDoc(d.ref)));
+
+      // 3. Delete face verification logs for this student in this exam
+      const faceLogsRef = collection(db, `artifacts/${appId}/public/data/face_verification_logs`);
+      const faceLogsSnap = await getDocs(
+        query(faceLogsRef, where('examId', '==', exam.id), where('studentId', '==', app.studentId))
+      );
+      await Promise.all(faceLogsSnap.docs.map(d => deleteDoc(d.ref)));
+
+      setApplications(prev => prev.filter(a => a.id !== app.id));
+      setConfirmDeleteApp(null);
+    } catch (error) {
+      console.error('Error deleting student:', error);
+      alert('Gagal menghapus peserta. Silakan coba lagi.');
+    } finally {
+      setIsDeletingStudent(false);
+    }
+  };
+
   const handleEditStatus = (application: Application) => {
     setEditingApplication(application);
     setNewStatus(application.status);
@@ -232,8 +262,53 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
 
   return (
     <div>
-      <Modal 
-        isOpen={!!editingApplication} 
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteApp && (
+        <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-900/60 rounded-full flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Hapus Peserta Ujian</h3>
+                <p className="text-sm text-gray-400">{confirmDeleteApp.studentData.fullName}</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-300 mb-2">Data berikut akan dihapus permanen:</p>
+            <ul className="text-sm text-gray-400 mb-5 bg-gray-700/50 rounded-lg p-3 space-y-1 list-disc list-inside">
+              <li>Pendaftaran ujian peserta ini</li>
+              <li>Riwayat/sesi ujian (jawaban, nilai, pelanggaran)</li>
+              <li>Log verifikasi wajah</li>
+            </ul>
+            <p className="text-xs text-yellow-400 mb-5">Peserta dapat mendaftar ulang menggunakan kode ujian yang sama setelah dihapus.</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmDeleteApp(null)}
+                disabled={isDeletingStudent}
+                className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-60"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => handleDeleteStudent(confirmDeleteApp)}
+                disabled={isDeletingStudent}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-60 flex items-center gap-2"
+              >
+                {isDeletingStudent && (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                )}
+                {isDeletingStudent ? 'Menghapus...' : 'Hapus Permanen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Modal
+        isOpen={!!editingApplication}
         title="Edit Status Siswa"
         onCancel={() => setEditingApplication(null)}
         onConfirm={handleSaveStatus}
@@ -414,30 +489,39 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
                         </span>
                       </td>
                       <td className="p-4">
-                        {app.status === 'pending' && (
-                          <div className="flex space-x-2">
+                        <div className="flex flex-wrap gap-1">
+                          {app.status === 'pending' && (
+                            <>
+                              <button
+                                onClick={() => handleIndividualAction(app.id, 'approve')}
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-3 rounded"
+                              >
+                                Setujui
+                              </button>
+                              <button
+                                onClick={() => handleIndividualAction(app.id, 'reject')}
+                                className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-3 rounded"
+                              >
+                                Tolak
+                              </button>
+                            </>
+                          )}
+                          {app.status !== 'pending' && (
                             <button
-                              onClick={() => handleIndividualAction(app.id, 'approve')}
-                              className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-3 rounded"
+                              onClick={() => handleEditStatus(app)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-3 rounded"
                             >
-                              Setujui
+                              Edit Status
                             </button>
-                            <button
-                              onClick={() => handleIndividualAction(app.id, 'reject')}
-                              className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-3 rounded"
-                            >
-                              Tolak
-                            </button>
-                          </div>
-                        )}
-                        {app.status !== 'pending' && (
+                          )}
                           <button
-                            onClick={() => handleEditStatus(app)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-3 rounded"
+                            onClick={() => setConfirmDeleteApp(app)}
+                            className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold py-1 px-3 rounded"
+                            title="Hapus peserta ujian beserta semua riwayatnya"
                           >
-                            Edit Status
+                            Hapus
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
