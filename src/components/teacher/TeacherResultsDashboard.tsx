@@ -69,10 +69,6 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [scoreReduction, setScoreReduction] = useState(0);
   const [scoreError, setScoreError] = useState('');
   const [historySession, setHistorySession] = useState<Session | null>(null);
-  const [editModalTab, setEditModalTab] = useState<'pg' | 'essay' | 'status'>('pg');
-  const [editingAnswers, setEditingAnswers] = useState<{ [key: string]: any }>({});
-  const [editingEssayAnswers, setEditingEssayAnswers] = useState<{ [key: string]: string }>({});
-  const [editingStatus, setEditingStatus] = useState<string>('finished');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editSuccess, setEditSuccess] = useState('');
 
@@ -256,33 +252,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
     setEditingScoreSession(session);
     setScoreReduction(session.scoreReduction || 0);
     setScoreError('');
-    setEditModalTab('pg');
     setEditSuccess('');
-
-    const pgAnswers: { [key: string]: any } = {};
-    const essayAnswers: { [key: string]: string } = {};
-    questions.forEach(q => {
-      if (q.type === 'mc') {
-        pgAnswers[q.id] = session.answers?.[q.id] ?? null;
-      } else if (q.type === 'essay') {
-        essayAnswers[q.id] = (session.answers?.[q.id] as string) || '';
-      }
-    });
-    setEditingAnswers(pgAnswers);
-    setEditingEssayAnswers(essayAnswers);
-    setEditingStatus(session.status || 'finished');
-  };
-
-  const recalcMCScore = (answers: { [key: string]: any }) => {
-    const mcQuestions = questions.filter(q => q.type === 'mc');
-    if (mcQuestions.length === 0) return 0;
-    let correct = 0;
-    mcQuestions.forEach(q => {
-      if (answers[q.id] !== null && answers[q.id] !== undefined && answers[q.id] === q.correctAnswer) {
-        correct++;
-      }
-    });
-    return (correct / mcQuestions.length) * 100;
   };
 
   const handleSaveAllEdits = async () => {
@@ -298,32 +268,12 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
         return;
       }
 
-      const newMCScore = recalcMCScore(editingAnswers);
-
-      const mergedAnswers = { ...(editingScoreSession.answers || {}) };
-      questions.forEach(q => {
-        if (q.type === 'mc') {
-          if (editingAnswers[q.id] !== null && editingAnswers[q.id] !== undefined) {
-            mergedAnswers[q.id] = editingAnswers[q.id];
-          } else {
-            delete mergedAnswers[q.id];
-          }
-        } else if (q.type === 'essay') {
-          mergedAnswers[q.id] = editingEssayAnswers[q.id] || '';
-        }
-      });
-
       const sessionDocRef = doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, editingScoreSession.id);
-      await updateDoc(sessionDocRef, {
-        scoreReduction,
-        finalScore: newMCScore,
-        answers: mergedAnswers,
-        status: editingStatus,
-      });
+      await updateDoc(sessionDocRef, { scoreReduction });
 
       setSessions(prev => prev.map(s =>
         s.id === editingScoreSession.id
-          ? { ...s, scoreReduction, finalScore: newMCScore, answers: mergedAnswers, status: editingStatus }
+          ? { ...s, scoreReduction }
           : s
       ));
 
@@ -335,8 +285,6 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
       setIsSavingEdit(false);
     }
   };
-
-  const handleSaveScoreReduction = handleSaveAllEdits;
 
   const downloadResultsPDF = () => {
     const sessionsToExport = filteredSessions;
@@ -864,195 +812,38 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
               </button>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-gray-700 bg-gray-800">
-              {[
-                { key: 'pg', label: 'Jawaban PG' },
-                { key: 'essay', label: 'Jawaban Essay' },
-                { key: 'status', label: 'Status & Nilai' },
-              ].map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => setEditModalTab(tab.key as any)}
-                  className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-                    editModalTab === tab.key
-                      ? 'border-b-2 border-blue-400 text-blue-300'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab Content */}
+            {/* Score Reduction Content */}
             <div className="flex-1 overflow-y-auto p-5">
-
-              {/* PG Answers Tab */}
-              {editModalTab === 'pg' && (
-                <div className="space-y-4">
-                  <p className="text-sm text-gray-400">Ubah jawaban pilihan ganda. Nilai PG akan dihitung ulang otomatis.</p>
-                  {questions.filter(q => q.type === 'mc').length === 0 && (
-                    <p className="text-center text-gray-500 py-8">Tidak ada soal pilihan ganda.</p>
-                  )}
-                  {questions.filter(q => q.type === 'mc').map((q, idx) => {
-                    const qIndex = questions.findIndex(x => x.id === q.id);
-                    const currentVal = editingAnswers[q.id];
-                    return (
-                      <div key={q.id} className="bg-gray-700 rounded-lg p-4">
-                        <div className="flex items-start gap-2 mb-3">
-                          <span className="bg-gray-600 text-white text-xs font-bold px-2 py-1 rounded shrink-0">#{qIndex + 1}</span>
-                          <p className="text-sm font-medium">{q.text || '(Soal bergambar)'}</p>
-                        </div>
-                        {q.image && <img src={q.image} alt="Soal" className="max-h-20 rounded mb-3 ml-8" />}
-                        <div className="grid grid-cols-2 gap-2 ml-8">
-                          {(q.options || []).map((opt, i) => {
-                            const isCorrect = q.correctAnswer === i;
-                            const isSelected = currentVal === i;
-                            return (
-                              <button
-                                key={i}
-                                onClick={() => setEditingAnswers(prev => ({ ...prev, [q.id]: i }))}
-                                className={`text-left text-xs p-2 rounded border transition-all ${
-                                  isSelected && isCorrect
-                                    ? 'border-green-500 bg-green-900/50 text-green-200'
-                                    : isSelected && !isCorrect
-                                    ? 'border-red-500 bg-red-900/50 text-red-200'
-                                    : isCorrect
-                                    ? 'border-green-700 bg-green-900/20 text-green-400'
-                                    : 'border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-400'
-                                }`}
-                              >
-                                <span className="font-bold mr-1">{String.fromCharCode(65 + i)}.</span>
-                                {opt}
-                                {isCorrect && <span className="ml-1 text-green-400">(kunci)</span>}
-                              </button>
-                            );
-                          })}
-                          <button
-                            onClick={() => setEditingAnswers(prev => ({ ...prev, [q.id]: null }))}
-                            className={`text-xs p-2 rounded border col-span-2 transition-all ${
-                              currentVal === null || currentVal === undefined
-                                ? 'border-gray-400 bg-gray-600 text-white'
-                                : 'border-gray-700 bg-gray-800 text-gray-500 hover:border-gray-500'
-                            }`}
-                          >
-                            Kosongkan (tidak dijawab)
-                          </button>
-                        </div>
-                        <div className="ml-8 mt-2 text-xs">
-                          {currentVal !== null && currentVal !== undefined ? (
-                            currentVal === q.correctAnswer
-                              ? <span className="text-green-400">Benar</span>
-                              : <span className="text-red-400">Salah (kunci: {String.fromCharCode(65 + (q.correctAnswer ?? 0))})</span>
-                          ) : (
-                            <span className="text-gray-500">Tidak dijawab</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {questions.filter(q => q.type === 'mc').length > 0 && (
-                    <div className="bg-blue-900/40 border border-blue-700 rounded-lg p-3 text-center">
-                      <span className="text-blue-300 text-sm font-semibold">
-                        Preview Nilai PG: {recalcMCScore(editingAnswers).toFixed(2)}
-                      </span>
-                    </div>
-                  )}
+              <div className="space-y-5">
+                {/* Score Reduction */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Pengurangan Nilai (0–100)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={scoreReduction}
+                    onChange={e => {
+                      setScoreReduction(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)));
+                      setScoreError('');
+                    }}
+                    className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Dikurangi dari total nilai akhir.</p>
                 </div>
-              )}
 
-              {/* Essay Answers Tab */}
-              {editModalTab === 'essay' && (
-                <div className="space-y-4">
-                  <p className="text-sm text-gray-400">Edit jawaban essay siswa. Perubahan akan tersimpan ke database.</p>
-                  {questions.filter(q => q.type === 'essay').length === 0 && (
-                    <p className="text-center text-gray-500 py-8">Tidak ada soal essay.</p>
-                  )}
-                  {questions.filter(q => q.type === 'essay').map((q) => {
-                    const qIndex = questions.findIndex(x => x.id === q.id);
-                    return (
-                      <div key={q.id} className="bg-gray-700 rounded-lg p-4">
-                        <div className="flex items-start gap-2 mb-3">
-                          <span className="bg-gray-600 text-white text-xs font-bold px-2 py-1 rounded shrink-0">#{qIndex + 1}</span>
-                          <p className="text-sm font-medium">{q.text || '(Soal bergambar)'}</p>
-                        </div>
-                        {q.image && <img src={q.image} alt="Soal" className="max-h-20 rounded mb-3 ml-8" />}
-                        <textarea
-                          value={editingEssayAnswers[q.id] || ''}
-                          onChange={e => setEditingEssayAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                          rows={4}
-                          className="w-full p-3 bg-gray-800 rounded border border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
-                          placeholder="Jawaban essay siswa..."
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Status & Score Reduction Tab */}
-              {editModalTab === 'status' && (
-                <div className="space-y-5">
-                  {/* Status */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2">Status Ujian</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { value: 'finished', label: 'Selesai', color: 'green' },
-                        { value: 'started', label: 'Sedang Ujian', color: 'blue' },
-                        { value: 'disqualified', label: 'Diskualifikasi', color: 'red' },
-                      ].map(opt => (
-                        <button
-                          key={opt.value}
-                          onClick={() => setEditingStatus(opt.value)}
-                          className={`py-3 px-4 rounded-lg border-2 text-sm font-bold transition-all ${
-                            editingStatus === opt.value
-                              ? opt.color === 'green'
-                                ? 'border-green-500 bg-green-900/50 text-green-200'
-                                : opt.color === 'blue'
-                                ? 'border-blue-500 bg-blue-900/50 text-blue-200'
-                                : 'border-red-500 bg-red-900/50 text-red-200'
-                              : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-400'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
+                {/* Score Summary */}
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="bg-blue-900/40 border border-blue-700 p-3 rounded-lg">
+                    <div className="text-blue-300 text-xs font-bold mb-1">Nilai PG</div>
+                    <div className="text-white font-bold text-lg">{(editingScoreSession?.finalScore ?? 0).toFixed(2)}</div>
                   </div>
-
-                  {/* Score Reduction */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2">Pengurangan Nilai (0–100)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={scoreReduction}
-                      onChange={e => {
-                        setScoreReduction(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)));
-                        setScoreError('');
-                      }}
-                      className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Dikurangi dari total nilai akhir.</p>
-                  </div>
-
-                  {/* Score Summary */}
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="bg-blue-900/40 border border-blue-700 p-3 rounded-lg">
-                      <div className="text-blue-300 text-xs font-bold mb-1">Nilai PG (setelah edit)</div>
-                      <div className="text-white font-bold text-lg">{recalcMCScore(editingAnswers).toFixed(2)}</div>
-                    </div>
-                    <div className="bg-red-900/40 border border-red-700 p-3 rounded-lg">
-                      <div className="text-red-300 text-xs font-bold mb-1">Pengurangan</div>
-                      <div className="text-white font-bold text-lg">-{scoreReduction}</div>
-                    </div>
+                  <div className="bg-red-900/40 border border-red-700 p-3 rounded-lg">
+                    <div className="text-red-300 text-xs font-bold mb-1">Pengurangan</div>
+                    <div className="text-white font-bold text-lg">-{scoreReduction}</div>
                   </div>
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Footer */}
