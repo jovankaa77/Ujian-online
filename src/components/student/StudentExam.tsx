@@ -1071,24 +1071,34 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     };
     
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Allow Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Space without violation
+      if (
+        e.ctrlKey && (e.key === 'a' || e.key === 'A' ||
+                      e.key === 'c' || e.key === 'C' ||
+                      e.key === 'x' || e.key === 'X' ||
+                      e.key === 'v' || e.key === 'V')
+      ) {
+        return;
+      }
+      if (e.key === ' ') {
+        return;
+      }
+
       // Block common cheating shortcuts
       if (
-        e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 't' || e.key === 'n' || e.key === 'w') ||
+        e.ctrlKey && (e.key === 't' || e.key === 'n' || e.key === 'w') ||
         e.key === 'F12' ||
         e.key === 'F11' || // Block F11 fullscreen toggle
         e.key === 'Escape' || // Block Escape key (exits fullscreen)
         (e.ctrlKey && e.shiftKey && e.key === 'I') ||
         (e.ctrlKey && e.shiftKey && e.key === 'J') ||
         (e.ctrlKey && e.key === 'u') ||
-
         (e.key === 'PrintScreen') || // Block screenshot
         e.altKey && e.key === 'Tab'
       ) {
         e.preventDefault();
         if (e.key === 'PrintScreen') {
           handleViolation("Screenshot Attempt");
-        } else if (e.ctrlKey && (e.key === 'c' || e.key === 'v')) {
-          handleViolation("Copy/Paste Attempt");
         } else {
           handleViolation("Prohibited Shortcut");
         }
