@@ -1,6 +1,5 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
-import InteractiveTerminal, { hasInputStatements } from './InteractiveTerminal';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   javascript: 'JavaScript',
@@ -14,7 +13,7 @@ const CODE_TEMPLATES: Record<string, string> = {
   javascript: `// JavaScript Hello World\nconsole.log("Hello, World!");`,
   python: `# Python Hello World\nprint("Hello, World!")`,
   php: `<?php\n// PHP Hello World\necho "Hello, World!";\n?>`,
-  cpp: `#include <iostream>\n#include <string>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`
+  cpp: `#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`
 };
 
 const WEB_DEFAULT_HTML = `<!DOCTYPE html>
@@ -488,7 +487,6 @@ export default function LiveCodeEditor({
   const [isRunning, setIsRunning] = useState(false);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
-  const [showInteractiveTerminal, setShowInteractiveTerminal] = useState(false);
 
   const isWebMode = language === 'htmlcss';
   const isJavaScript = language === 'javascript';
@@ -586,15 +584,8 @@ export default function LiveCodeEditor({
       return;
     }
 
-    if ((language === 'cpp' || language === 'python' || language === 'php') && hasInputStatements(code)) {
-      setCodeOutput(null);
-      setShowInteractiveTerminal(true);
-      return;
-    }
-
     setIsRunning(true);
     setCodeOutput({ output: 'Menjalankan kode...', error: false });
-    setShowInteractiveTerminal(false);
 
     if (isJavaScript) {
       const result = await executeJavaScriptInWorker(code, 3000);
@@ -621,8 +612,7 @@ export default function LiveCodeEditor({
           body: JSON.stringify({
             language: pistonConfig.language,
             version: pistonConfig.version,
-            files: [{ content: code }],
-            stdin: ''
+            files: [{ content: code }]
           }),
           signal: controller.signal
         });
@@ -895,15 +885,7 @@ export default function LiveCodeEditor({
         </div>
       )}
 
-      {showInteractiveTerminal && !isWebMode && (
-        <InteractiveTerminal
-          language={language}
-          code={currentDraft !== undefined ? currentDraft : (savedAnswer || '')}
-          onClose={() => setShowInteractiveTerminal(false)}
-        />
-      )}
-
-      {codeOutput && !isWebMode && !showInteractiveTerminal && (
+      {codeOutput && !isWebMode && (
         <div className="rounded-lg overflow-hidden border border-gray-600">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
             <div className="flex items-center gap-2">
