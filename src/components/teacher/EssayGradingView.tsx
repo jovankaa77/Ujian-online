@@ -103,7 +103,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
   const [htmlActiveTabs, setHtmlActiveTabs] = useState<{ [key: string]: WebTab }>({});
   const [htmlPreviewModes, setHtmlPreviewModes] = useState<{ [key: string]: PreviewMode }>({});
-  const [stdinInputs, setStdinInputs] = useState<{ [key: string]: string }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
     const newScores = { ...essayScores };
@@ -264,10 +263,9 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       try {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
         const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        const stdinValue = stdinInputs[questionId] || '';
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
           method: 'POST',
@@ -278,8 +276,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
           body: JSON.stringify({
             language: pistonConfig.language,
             version: pistonConfig.version,
-            files: [{ content: code }],
-            stdin: stdinValue,
+            files: [{ content: code }]
           }),
           signal: controller.signal
         });
@@ -631,21 +628,6 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
 
                   {session.answers[q.id] && (
                     <div className="mt-3">
-                      {/* Stdin input for languages that need it */}
-                      {!isHtmlCss && (q.language === 'cpp' || q.language === 'python' || q.language === 'php') && (
-                        <div className="mb-3">
-                          <label className="block text-xs text-gray-400 mb-1">
-                            Input (stdin) - satu nilai per baris:
-                          </label>
-                          <textarea
-                            value={stdinInputs[q.id] || ''}
-                            onChange={e => setStdinInputs(prev => ({ ...prev, [q.id]: e.target.value }))}
-                            placeholder="Masukkan input untuk program, pisahkan dengan Enter untuk setiap input..."
-                            rows={2}
-                            className="w-full p-2 bg-gray-900 border border-gray-600 rounded text-sm font-mono text-white resize-y"
-                          />
-                        </div>
-                      )}
                       <div className="flex gap-2">
                         <button
                           onClick={() => runStudentCode(q.id, q.language || 'javascript')}
