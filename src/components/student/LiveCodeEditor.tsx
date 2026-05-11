@@ -494,6 +494,8 @@ export default function LiveCodeEditor({
   const [pendingStdin, setPendingStdin] = useState<string[]>([]);
   const [awaitingInput, setAwaitingInput] = useState(false);
   const [stdinCollected, setStdinCollected] = useState<string | null>(null);
+  // Store [prompt, value] pairs for the merge step
+  const collectedPairs = useRef<{ prompt: string; value: string }[]>([]);
   const terminalInputRef = useRef<HTMLInputElement>(null);
   const terminalBottomRef = useRef<HTMLDivElement>(null);
 
@@ -600,6 +602,44 @@ export default function LiveCodeEditor({
     return prompts;
   }
 
+  // Reconstruct a realistic terminal view by interleaving stdin echo into stdout.
+  // Piston captures stdout (cout) but does not echo stdin (cin). We must insert the
+  // typed values back at the points where the program read them.
+  //
+  // We use the known prompt texts and their values (from collectedPairs.current)
+  // to find exact positions in the stdout string and insert inputs inline.
+  //
+  // Example stdout: "Masukkan a: Masukkan b: Hasil: 8\n"
+  // pairs: [{prompt:"Masukkan a: ", value:"5"}, {prompt:"Masukkan b: ", value:"3"}]
+  // Result: "Masukkan a: 5\nMasukkan b: 3\nHasil: 8"
+  function mergeStdinIntoOutput(stdout: string, pairs: { prompt: string; value: string }[]): string {
+    if (!pairs.length) return stdout;
+
+    let remaining = stdout;
+    const parts: string[] = [];
+
+    for (const { prompt, value } of pairs) {
+      const idx = remaining.indexOf(prompt);
+      if (idx !== -1) {
+        if (idx > 0) {
+          // Content before this prompt (e.g., output from previous iteration)
+          parts.push(remaining.slice(0, idx));
+        }
+        parts.push(prompt + value + '\n');
+        remaining = remaining.slice(idx + prompt.length);
+      } else {
+        // Prompt not found in stdout (e.g., no prompt before cin) — just echo the value
+        parts.push(value + '\n');
+      }
+    }
+
+    // Remaining stdout after all inputs (e.g., the final result line)
+    const tail = remaining.replace(/^\n/, '').trimEnd();
+    if (tail) parts.push(tail);
+
+    return parts.join('');
+  }
+
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
     editor.focus();
@@ -634,10 +674,14 @@ export default function LiveCodeEditor({
     return 'javascript';
   };
 
-  const executeWithStdin = useCallback(async (code: string, stdin: string) => {
+  // useTerminal=true: append result into terminalLines (for cin flows)
+  // useTerminal=false: set codeOutput directly (for no-cin flows)
+  const executeWithStdin = useCallback(async (code: string, stdin: string, useTerminal: boolean = false) => {
     const pistonConfig = PISTON_CONFIG[language];
     if (!pistonConfig) {
-      setCodeOutput({ output: 'Error: Bahasa pemrograman tidak didukung.', error: true });
+      const errOut = { output: 'Error: Bahasa pemrograman tidak didukung.', error: true };
+      if (useTerminal) setTerminalLines(prev => [...prev.filter(l => l.text !== 'Menjalankan...'), { text: errOut.output, type: 'output' as const }]);
+      else setCodeOutput(errOut);
       setIsRunning(false);
       return;
     }
@@ -660,12 +704,23 @@ export default function LiveCodeEditor({
       });
       clearTimeout(timeoutId);
 
+      const setOut = (out: { output: string; error: boolean }) => {
+        if (useTerminal) {
+          setTerminalLines(prev => {
+            const filtered = prev.filter(l => l.text !== 'Menjalankan...');
+            return [...filtered, { text: out.output, type: 'output' as const }];
+          });
+        } else {
+          setCodeOutput(out);
+        }
+      };
+
       if (!response.ok) {
         let errorMsg = 'Error: Server mengembalikan status ' + response.status;
         if (response.status === 429) errorMsg = 'Error: Terlalu banyak request. Harap tunggu beberapa detik.';
         else if (response.status === 504 || response.status === 408) errorMsg = 'Error: Waktu eksekusi habis. Periksa apakah ada infinite loop.';
         else if (response.status >= 500) errorMsg = 'Error: Server eksekusi sedang bermasalah.';
-        setCodeOutput({ output: errorMsg, error: true });
+        setOut({ output: errorMsg, error: true });
         setIsRunning(false);
         return;
       }
@@ -673,15 +728,12 @@ export default function LiveCodeEditor({
       const data = await response.json();
 
       if (data.compile?.stderr?.trim()) {
-        setCodeOutput({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
+        setOut({ output: 'Compilation Error:\n' + String(data.compile.stderr), error: true });
         setIsRunning(false);
         return;
       }
       if (data.run?.signal === 'SIGKILL') {
-        setCodeOutput({
-          output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan terjadi infinite loop atau recursion tanpa batas.\nPeriksa kembali logika perulangan/rekursi Anda.',
-          error: true,
-        });
+        setOut({ output: 'Error: Program dihentikan karena timeout atau menggunakan memori berlebihan.\nKemungkinan terjadi infinite loop atau recursion tanpa batas.\nPeriksa kembali logika perulangan/rekursi Anda.', error: true });
         setIsRunning(false);
         return;
       }
@@ -689,23 +741,37 @@ export default function LiveCodeEditor({
       const hasStderr = data.run?.stderr?.trim();
       const hasStdout = data.run?.stdout?.trim();
 
-      if (hasStderr && hasStdout) {
-        setCodeOutput({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
+      if (useTerminal) {
+        // Replace the entire terminal with a merged realistic view:
+        // stdin values are echoed inline with their cout prompts.
+        const rawOut = hasStdout ? String(data.run.stdout) : '';
+        const pairs = collectedPairs.current;
+        const merged = pairs.length > 0 ? mergeStdinIntoOutput(rawOut, pairs) : rawOut;
+        const hasErr = !!hasStderr;
+        const finalOut = hasErr
+          ? (merged ? merged + '\n' : '') + 'Error:\n' + String(data.run.stderr)
+          : (merged || '(Eksekusi berhasil tanpa output)');
+        setTerminalLines([{ text: finalOut, type: 'output' as const }]);
+      } else if (hasStderr && hasStdout) {
+        setOut({ output: String(data.run.stdout) + '\n\nWarning/Error:\n' + String(data.run.stderr), error: false });
       } else if (hasStderr) {
-        setCodeOutput({ output: 'Error:\n' + String(data.run.stderr), error: true });
+        setOut({ output: 'Error:\n' + String(data.run.stderr), error: true });
       } else if (hasStdout) {
-        setCodeOutput({ output: String(data.run.stdout), error: false });
+        setOut({ output: String(data.run.stdout), error: false });
       } else {
-        setCodeOutput({ output: '(Eksekusi berhasil tanpa output)', error: false });
+        setOut({ output: '(Eksekusi berhasil tanpa output)', error: false });
       }
       setIsRunning(false);
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        setCodeOutput({ output: 'Error: Waktu eksekusi habis (timeout 15 detik).\nKemungkinan terjadi infinite loop. Periksa kembali logika perulangan Anda.', error: true });
-      } else if (err.name === 'TypeError') {
-        setCodeOutput({ output: 'Error: Tidak dapat terhubung ke server. Pastikan koneksi internet Anda aktif.', error: true });
+      const out = err.name === 'AbortError'
+        ? { output: 'Error: Waktu eksekusi habis (timeout 15 detik).\nKemungkinan terjadi infinite loop. Periksa kembali logika perulangan Anda.', error: true }
+        : err.name === 'TypeError'
+        ? { output: 'Error: Tidak dapat terhubung ke server. Pastikan koneksi internet Anda aktif.', error: true }
+        : { output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'), error: true };
+      if (useTerminal) {
+        setTerminalLines(prev => [...prev.filter(l => l.text !== 'Menjalankan...'), { text: out.output, type: 'output' as const }]);
       } else {
-        setCodeOutput({ output: 'Error: ' + (err.message || 'Terjadi kesalahan tidak diketahui.'), error: true });
+        setCodeOutput(out);
       }
       setIsRunning(false);
     }
@@ -730,6 +796,7 @@ export default function LiveCodeEditor({
     setPendingStdin([]);
     setAwaitingInput(false);
     setStdinCollected(null);
+    collectedPairs.current = [];
     setIsRunning(true);
 
     if (isJavaScript) {
@@ -762,13 +829,22 @@ export default function LiveCodeEditor({
 
   const handleTerminalInputSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    const value = terminalInput.trim();
+    const value = terminalInput;
     const code = currentDraft !== undefined ? currentDraft : (savedAnswer || '');
 
+    // Find the current prompt text from the last 'prompt' line
+    const currentPromptLine = terminalLines.slice().reverse().find(l => l.type === 'prompt');
+    const currentPromptText = currentPromptLine ? currentPromptLine.text : '';
+
+    // Record the pair for merging later
+    collectedPairs.current = [...collectedPairs.current, { prompt: currentPromptText, value }];
+
+    // Update display: replace prompt line with prompt+value (as 'input' line)
     setTerminalLines(prev => {
       const updated = [...prev];
-      if (updated.length > 0 && updated[updated.length - 1].type === 'prompt') {
-        updated[updated.length - 1] = { text: updated[updated.length - 1].text + value, type: 'input' };
+      const lastPromptIdx = updated.map(l => l.type).lastIndexOf('prompt');
+      if (lastPromptIdx !== -1) {
+        updated[lastPromptIdx] = { text: updated[lastPromptIdx].text + value, type: 'input' };
       } else {
         updated.push({ text: value, type: 'input' });
       }
@@ -776,25 +852,19 @@ export default function LiveCodeEditor({
     });
     setTerminalInput('');
 
-    const allInputs = terminalLines
-      .filter(l => l.type === 'input')
-      .map(l => {
-        const colonIdx = l.text.indexOf(': ');
-        return colonIdx !== -1 ? l.text.slice(colonIdx + 2) : l.text;
-      });
-    allInputs.push(value);
+    const allValues = collectedPairs.current.map(p => p.value);
 
     if (pendingStdin.length > 0) {
       const nextPrompt = pendingStdin[0];
       setTerminalLines(prev => [...prev, { text: nextPrompt + ': ', type: 'prompt' }]);
       setPendingStdin(prev => prev.slice(1));
     } else {
-      const stdinString = allInputs.join('\n') + '\n';
+      const stdinString = allValues.join('\n') + '\n';
       setStdinCollected(stdinString);
       setAwaitingInput(false);
       setIsRunning(true);
       setTerminalLines(prev => [...prev, { text: 'Menjalankan...', type: 'output' }]);
-      await executeWithStdin(code, stdinString);
+      await executeWithStdin(code, stdinString, true);
     }
   }, [terminalInput, terminalLines, pendingStdin, currentDraft, savedAnswer, executeWithStdin]);
 
@@ -1002,7 +1072,7 @@ export default function LiveCodeEditor({
               {awaitingInput && <span className="text-xs text-blue-300 font-mono">— menunggu input</span>}
             </div>
             <button
-              onClick={() => { setTerminalLines([]); setAwaitingInput(false); setPendingStdin([]); setStdinCollected(null); setIsRunning(false); }}
+              onClick={() => { setTerminalLines([]); setAwaitingInput(false); setPendingStdin([]); setStdinCollected(null); collectedPairs.current = []; setIsRunning(false); }}
               className="text-gray-400 hover:text-white text-xs transition-colors"
             >
               Tutup

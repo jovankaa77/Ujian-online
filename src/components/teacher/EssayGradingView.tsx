@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import Editor from '@monaco-editor/react';
@@ -103,6 +103,17 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
   const [htmlPreviews, setHtmlPreviews] = useState<{ [key: string]: boolean }>({});
   const [htmlActiveTabs, setHtmlActiveTabs] = useState<{ [key: string]: WebTab }>({});
   const [htmlPreviewModes, setHtmlPreviewModes] = useState<{ [key: string]: PreviewMode }>({});
+
+  // Interactive terminal state (keyed by questionId)
+  type TerminalLine = { text: string; type: 'output' | 'input' | 'prompt' };
+  const [terminalLines, setTerminalLines] = useState<{ [key: string]: TerminalLine[] }>({});
+  const [terminalInputs, setTerminalInputs] = useState<{ [key: string]: string }>({});
+  const [pendingStdin, setPendingStdin] = useState<{ [key: string]: string[] }>({});
+  const [awaitingInput, setAwaitingInput] = useState<{ [key: string]: boolean }>({});
+  const collectedPairs = useRef<{ [key: string]: { prompt: string; value: string }[] }>({});
+  const terminalInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+  const terminalBottomRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  const [focusTrigger, setFocusTrigger] = useState<{ [key: string]: number }>({});
 
   const handleEssayScoreChange = (questionId: string, score: string) => {
     const newScores = { ...essayScores };
@@ -231,6 +242,144 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
     });
   };
 
+  function detectCinCount(code: string, lang: string): number {
+    if (lang === 'cpp') return (code.match(/\bcin\s*>>/g) || []).length;
+    if (lang === 'python') return (code.match(/\binput\s*\(/g) || []).length;
+    if (lang === 'php') return (code.match(/\bfgets\s*\(|\breadline\s*\(|\bfscanf\s*\(/g) || []).length;
+    return 0;
+  }
+
+  function extractPromptTexts(code: string, lang: string): string[] {
+    const prompts: string[] = [];
+    if (lang === 'cpp') {
+      const re = /cout\s*<<\s*((?:"[^"]*"|'[^']*'|\s*<<\s*(?:"[^"]*"|'[^']*'))*)\s*;?\s*cin\s*>>/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(code)) !== null) {
+        const raw = m[1].replace(/<<\s*/g, '').replace(/\s*endl\b/g, '').replace(/\\n/g, '').replace(/["']/g, '').trim();
+        if (raw) prompts.push(raw);
+      }
+      const cinCount = (code.match(/\bcin\s*>>/g) || []).length;
+      while (prompts.length < cinCount) prompts.push('Input');
+    } else if (lang === 'python') {
+      const re = /\binput\s*\(\s*(["'])(.*?)\1\s*\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(code)) !== null) prompts.push(m[2] || 'Input');
+      const inputCount = (code.match(/\binput\s*\(/g) || []).length;
+      while (prompts.length < inputCount) prompts.push('Input');
+    } else {
+      const count = detectCinCount(code, lang);
+      for (let i = 0; i < count; i++) prompts.push('Input');
+    }
+    return prompts;
+  }
+
+  function mergeStdinIntoOutput(stdout: string, pairs: { prompt: string; value: string }[]): string {
+    if (!pairs.length) return stdout;
+    let remaining = stdout;
+    const parts: string[] = [];
+    for (const { prompt, value } of pairs) {
+      const idx = remaining.indexOf(prompt);
+      if (idx !== -1) {
+        if (idx > 0) parts.push(remaining.slice(0, idx));
+        parts.push(prompt + value + '\n');
+        remaining = remaining.slice(idx + prompt.length);
+      } else {
+        parts.push(value + '\n');
+      }
+    }
+    const tail = remaining.replace(/^\n/, '').trimEnd();
+    if (tail) parts.push(tail);
+    return parts.join('');
+  }
+
+  const executeCode = async (questionId: string, language: string, code: string, stdin: string, useTerminal: boolean) => {
+    const pistonConfig = PISTON_CONFIG[language];
+    if (!pistonConfig) {
+      const err = { output: 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.', error: true };
+      if (useTerminal) {
+        setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: err.output, type: 'output' }] }));
+      } else {
+        setCodeOutputs(prev => ({ ...prev, [questionId]: err }));
+      }
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
+      return;
+    }
+
+    const setOut = (out: { output: string; error: boolean }) => {
+      if (useTerminal) {
+        const pairs = collectedPairs.current[questionId] || [];
+        const rawOut = out.error ? '' : out.output;
+        const merged = pairs.length > 0 ? mergeStdinIntoOutput(rawOut, pairs) : rawOut;
+        const finalOut = out.error ? out.output : (merged || '(Eksekusi berhasil tanpa output)');
+        setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: finalOut, type: 'output' }] }));
+      } else {
+        setCodeOutputs(prev => ({ ...prev, [questionId]: out }));
+      }
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
+    };
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+        body: JSON.stringify({ language: pistonConfig.language, version: pistonConfig.version, files: [{ content: code }], stdin }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let errorMsg = 'Error: Server mengembalikan status ' + response.status;
+        if (response.status === 429) errorMsg = 'Error: Terlalu banyak request.';
+        else if (response.status >= 500) errorMsg = 'Error: Server eksekusi bermasalah.';
+        setOut({ output: errorMsg, error: true });
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.compile?.stderr?.trim()) {
+        setOut({ output: 'Compilation Error:\n' + data.compile.stderr, error: true });
+        return;
+      }
+      if (data.run?.signal === 'SIGKILL') {
+        setOut({ output: 'Error: Program dihentikan (timeout/memory limit). Kemungkinan infinite loop.', error: true });
+        return;
+      }
+
+      const hasStderr = data.run?.stderr?.trim();
+      const hasStdout = data.run?.stdout?.trim();
+
+      if (useTerminal) {
+        const rawOut = hasStdout ? String(data.run.stdout) : '';
+        const pairs = collectedPairs.current[questionId] || [];
+        const merged = pairs.length > 0 ? mergeStdinIntoOutput(rawOut, pairs) : rawOut;
+        const finalOut = hasStderr
+          ? (merged ? merged + '\n' : '') + 'Error:\n' + String(data.run.stderr)
+          : (merged || '(Eksekusi berhasil tanpa output)');
+        setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: finalOut, type: 'output' }] }));
+        setRunningCode(prev => ({ ...prev, [questionId]: false }));
+      } else if (hasStderr && hasStdout) {
+        setOut({ output: data.run.stdout + '\n\nWarning:\n' + data.run.stderr, error: false });
+      } else if (hasStderr) {
+        setOut({ output: 'Error:\n' + data.run.stderr, error: true });
+      } else if (hasStdout) {
+        setOut({ output: data.run.stdout, error: false });
+      } else {
+        setOut({ output: '(Eksekusi berhasil tanpa output)', error: false });
+      }
+    } catch (err: any) {
+      const errorMsg = err.name === 'AbortError'
+        ? 'Error: Timeout. Kemungkinan infinite loop.'
+        : 'Error: ' + (err.message || 'Gagal menjalankan kode');
+      setOut({ output: errorMsg, error: true });
+    }
+  };
+
   const runStudentCode = async (questionId: string, language: string) => {
     const code = session.answers[questionId] || '';
     if (!code.trim()) {
@@ -240,16 +389,18 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
 
     if (language === 'htmlcss') {
       setHtmlPreviews(prev => ({ ...prev, [questionId]: true }));
-      setCodeOutputs(prev => {
-        const newOutputs = { ...prev };
-        delete newOutputs[questionId];
-        return newOutputs;
-      });
+      setCodeOutputs(prev => { const n = { ...prev }; delete n[questionId]; return n; });
       return;
     }
 
+    // Reset terminal state for this question
+    setTerminalLines(prev => { const n = { ...prev }; delete n[questionId]; return n; });
+    setTerminalInputs(prev => ({ ...prev, [questionId]: '' }));
+    setPendingStdin(prev => { const n = { ...prev }; delete n[questionId]; return n; });
+    setAwaitingInput(prev => ({ ...prev, [questionId]: false }));
+    collectedPairs.current[questionId] = [];
+    setCodeOutputs(prev => { const n = { ...prev }; delete n[questionId]; return n; });
     setRunningCode(prev => ({ ...prev, [questionId]: true }));
-    setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Menjalankan kode...', error: false } }));
 
     if (language === 'javascript') {
       const result = await executeJavaScriptInWorker(code, 3000);
@@ -258,87 +409,83 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       return;
     }
 
-    const pistonConfig = PISTON_CONFIG[language];
-    if (pistonConfig) {
-      try {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-        const response = await fetch(`${supabaseUrl}/functions/v1/run-code`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`
-          },
-          body: JSON.stringify({
-            language: pistonConfig.language,
-            version: pistonConfig.version,
-            files: [{ content: code }]
-          }),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          let errorMsg = 'Error: Server mengembalikan status ' + response.status;
-          if (response.status === 429) errorMsg = 'Error: Terlalu banyak request.';
-          else if (response.status >= 500) errorMsg = 'Error: Server eksekusi bermasalah.';
-          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: errorMsg, error: true } }));
-          setRunningCode(prev => ({ ...prev, [questionId]: false }));
-          return;
-        }
-
-        const data = await response.json();
-
-        if (data.compile?.stderr?.trim()) {
-          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Compilation Error:\n' + data.compile.stderr, error: true } }));
-          setRunningCode(prev => ({ ...prev, [questionId]: false }));
-          return;
-        }
-
-        if (data.run?.signal === 'SIGKILL') {
-          setCodeOutputs(prev => ({
-            ...prev,
-            [questionId]: { output: 'Error: Program dihentikan (timeout/memory limit). Kemungkinan infinite loop.', error: true }
-          }));
-          setRunningCode(prev => ({ ...prev, [questionId]: false }));
-          return;
-        }
-
-        const hasStderr = data.run?.stderr?.trim();
-        const hasStdout = data.run?.stdout?.trim();
-
-        if (hasStderr && hasStdout) {
-          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: data.run.stdout + '\n\nWarning:\n' + data.run.stderr, error: false } }));
-        } else if (hasStderr) {
-          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: 'Error:\n' + data.run.stderr, error: true } }));
-        } else if (hasStdout) {
-          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: data.run.stdout, error: false } }));
-        } else {
-          setCodeOutputs(prev => ({ ...prev, [questionId]: { output: '(Eksekusi berhasil tanpa output)', error: false } }));
-        }
-        setRunningCode(prev => ({ ...prev, [questionId]: false }));
-        return;
-      } catch (err: any) {
-        const errorMsg = err.name === 'AbortError'
-          ? 'Error: Timeout. Kemungkinan infinite loop.'
-          : 'Error: ' + (err.message || 'Gagal menjalankan kode');
-        setCodeOutputs(prev => ({ ...prev, [questionId]: { output: errorMsg, error: true } }));
-        setRunningCode(prev => ({ ...prev, [questionId]: false }));
-        return;
-      }
+    const cinCount = detectCinCount(code, language);
+    if (cinCount > 0) {
+      const prompts = extractPromptTexts(code, language);
+      setTerminalLines(prev => ({ ...prev, [questionId]: [{ text: prompts[0] + ': ', type: 'prompt' }] }));
+      setPendingStdin(prev => ({ ...prev, [questionId]: prompts.slice(1) }));
+      setAwaitingInput(prev => ({ ...prev, [questionId]: true }));
+      setRunningCode(prev => ({ ...prev, [questionId]: false }));
+      setFocusTrigger(prev => ({ ...prev, [questionId]: (prev[questionId] || 0) + 1 }));
+      return;
     }
 
-    setCodeOutputs(prev => ({
-      ...prev,
-      [questionId]: { output: 'Bahasa pemrograman tidak didukung untuk eksekusi langsung.', error: true }
-    }));
-    setRunningCode(prev => ({ ...prev, [questionId]: false }));
+    await executeCode(questionId, language, code, '', false);
   };
+
+  const handleTerminalInputSubmit = async (e: React.FormEvent, questionId: string, language: string) => {
+    e.preventDefault();
+    const value = terminalInputs[questionId] || '';
+    const code = session.answers[questionId] || '';
+
+    const lines = terminalLines[questionId] || [];
+    const currentPromptLine = lines.slice().reverse().find(l => l.type === 'prompt');
+    const currentPromptText = currentPromptLine ? currentPromptLine.text : '';
+
+    collectedPairs.current[questionId] = [
+      ...(collectedPairs.current[questionId] || []),
+      { prompt: currentPromptText, value },
+    ];
+
+    setTerminalLines(prev => {
+      const prevLines = prev[questionId] || [];
+      const updated = [...prevLines];
+      const lastPromptIdx = updated.map(l => l.type).lastIndexOf('prompt');
+      if (lastPromptIdx !== -1) {
+        updated[lastPromptIdx] = { text: updated[lastPromptIdx].text + value, type: 'input' };
+      } else {
+        updated.push({ text: value, type: 'input' });
+      }
+      return { ...prev, [questionId]: updated };
+    });
+    setTerminalInputs(prev => ({ ...prev, [questionId]: '' }));
+
+    const qPending = pendingStdin[questionId] || [];
+    const allValues = collectedPairs.current[questionId].map(p => p.value);
+
+    if (qPending.length > 0) {
+      const nextPrompt = qPending[0];
+      setTerminalLines(prev => ({
+        ...prev,
+        [questionId]: [...(prev[questionId] || []), { text: nextPrompt + ': ', type: 'prompt' }],
+      }));
+      setPendingStdin(prev => ({ ...prev, [questionId]: qPending.slice(1) }));
+      setFocusTrigger(prev => ({ ...prev, [questionId]: (prev[questionId] || 0) + 1 }));
+    } else {
+      const stdinString = allValues.join('\n') + '\n';
+      setAwaitingInput(prev => ({ ...prev, [questionId]: false }));
+      setRunningCode(prev => ({ ...prev, [questionId]: true }));
+      setTerminalLines(prev => ({
+        ...prev,
+        [questionId]: [...(prev[questionId] || []), { text: 'Menjalankan...', type: 'output' }],
+      }));
+      await executeCode(questionId, language, code, stdinString, true);
+    }
+  };
+
+  useLayoutEffect(() => {
+    Object.keys(terminalBottomRefs.current).forEach(qId => {
+      terminalBottomRefs.current[qId]?.scrollIntoView({ behavior: 'smooth' });
+    });
+  }, [terminalLines]);
+
+  useEffect(() => {
+    Object.entries(focusTrigger).forEach(([qId, trigger]) => {
+      if (trigger > 0 && awaitingInput[qId]) {
+        terminalInputRefs.current[qId]?.focus();
+      }
+    });
+  }, [focusTrigger, awaitingInput]);
 
   const handleSaveAllScores = async () => {
     setIsSaving(true);
@@ -631,9 +778,9 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                       <div className="flex gap-2">
                         <button
                           onClick={() => runStudentCode(q.id, q.language || 'javascript')}
-                          disabled={runningCode[q.id]}
+                          disabled={runningCode[q.id] || awaitingInput[q.id]}
                           className={`font-bold py-2 px-4 rounded ${
-                            runningCode[q.id]
+                            runningCode[q.id] || awaitingInput[q.id]
                               ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
                               : 'bg-blue-600 hover:bg-blue-700 text-white'
                           }`}
@@ -641,6 +788,53 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                           {runningCode[q.id] ? 'Running...' : (isHtmlCss ? (htmlPreviews[q.id] ? 'Refresh Preview' : 'Preview') : 'Run Code')}
                         </button>
                       </div>
+
+                      {(terminalLines[q.id]?.length > 0 || awaitingInput[q.id]) && (
+                        <div className="mt-3 rounded-lg overflow-hidden border border-gray-600">
+                          <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${awaitingInput[q.id] ? 'bg-blue-400 animate-pulse' : runningCode[q.id] ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
+                              <span className="text-sm font-mono text-gray-300">Terminal</span>
+                              {awaitingInput[q.id] && <span className="text-xs text-blue-300 font-mono">— masukkan input</span>}
+                            </div>
+                            <button
+                              onClick={() => {
+                                setTerminalLines(prev => { const n = { ...prev }; delete n[q.id]; return n; });
+                                setAwaitingInput(prev => ({ ...prev, [q.id]: false }));
+                                setPendingStdin(prev => { const n = { ...prev }; delete n[q.id]; return n; });
+                                collectedPairs.current[q.id] = [];
+                                setRunningCode(prev => ({ ...prev, [q.id]: false }));
+                              }}
+                              className="text-gray-400 hover:text-white text-xs transition-colors"
+                            >
+                              Tutup
+                            </button>
+                          </div>
+                          <div className="bg-gray-950 p-4 min-h-[60px] max-h-[260px] overflow-auto font-mono text-sm">
+                            {(terminalLines[q.id] || []).map((line, i) => (
+                              <div key={i} className={`leading-relaxed ${line.type === 'input' ? 'text-white' : line.type === 'prompt' ? 'text-gray-300' : 'text-green-400'}`}>
+                                <span style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>{line.text}</span>
+                              </div>
+                            ))}
+                            {awaitingInput[q.id] && (
+                              <form onSubmit={(e) => handleTerminalInputSubmit(e, q.id, q.language || 'cpp')} className="flex items-center">
+                                <input
+                                  ref={el => { terminalInputRefs.current[q.id] = el; }}
+                                  type="text"
+                                  value={terminalInputs[q.id] || ''}
+                                  onChange={e => setTerminalInputs(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                  className="bg-transparent border-none outline-none text-white font-mono text-sm flex-1 caret-white"
+                                  style={{ minWidth: 0 }}
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                />
+                                <span className="text-white animate-pulse ml-0.5">|</span>
+                              </form>
+                            )}
+                            <div ref={el => { terminalBottomRefs.current[q.id] = el; }} />
+                          </div>
+                        </div>
+                      )}
 
                       {codeOutputs[q.id] && (
                         <div className={`mt-3 p-4 rounded-md border ${codeOutputs[q.id].error ? 'bg-red-900 border-red-500' : 'bg-gray-900 border-gray-600'}`}>
