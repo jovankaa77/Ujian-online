@@ -391,6 +391,18 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
                         })
                       }
                     />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDelete({ type: 'baseline', sessionId: photo.id, studentName: photo.fullName });
+                      }}
+                      className="absolute top-1.5 right-1.5 w-7 h-7 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-colors"
+                      title="Hapus foto verifikasi"
+                    >
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
                   <div className="p-3">
                     <h4 className="font-bold text-white text-sm truncate">
