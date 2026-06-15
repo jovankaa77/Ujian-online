@@ -221,7 +221,7 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
     <div>
       <Modal 
         isOpen={!!selectedRecording} 
-        title={`Rekaman Suara - ${selectedRecording?.studentInfo?.name || 'Siswa'}`}
+        title={`Rekaman Suara - ${selectedRecording?.studentInfo?.name || 'Peserta Ujian'}`}
         onCancel={() => {
           setSelectedRecording(null);
           if (currentAudio) {
@@ -287,14 +287,14 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
         {/* Search Bar */}
         <div className="mb-4">
           <label htmlFor="search" className="block text-sm font-medium text-gray-300 mb-2">
-            Cari Siswa (Nama, NIM, Kelas, atau Jurusan)
+            Cari Peserta Ujian (Nama, NIM, Kelas, atau Jurusan)
           </label>
           <input
             id="search"
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Ketik nama, NIM, kelas, atau jurusan siswa..."
+            placeholder="Ketik nama, NIM, kelas, atau jurusan peserta ujian..."
             className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
         </div>
@@ -373,7 +373,7 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
       <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-blue-600 p-4 rounded-lg text-center">
           <div className="text-2xl font-bold">{sessions.length}</div>
-          <div className="text-sm">Total Siswa</div>
+          <div className="text-sm">Total Peserta Ujian</div>
         </div>
         <div className="bg-purple-600 p-4 rounded-lg text-center">
           <div className="text-2xl font-bold">{voiceRecordings.length}</div>
@@ -389,7 +389,7 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
           <div className="text-2xl font-bold">
             {new Set(voiceRecordings.map(r => r.studentInfo.name)).size}
           </div>
-          <div className="text-sm">Siswa Berbicara</div>
+          <div className="text-sm">Peserta Ujian Berbicara</div>
         </div>
       </div>
       
@@ -398,7 +398,7 @@ const TeacherVoiceMonitoring: React.FC<TeacherVoiceMonitoringProps> = ({ navigat
           <div className="text-6xl mb-4">🎤</div>
           <h3 className="text-xl font-bold text-gray-400 mb-2">Belum Ada Rekaman Suara</h3>
           <p className="text-gray-500">
-            Rekaman suara akan muncul secara real-time ketika sistem mendeteksi aktivitas bicara dari siswa selama ujian.
+            Rekaman suara akan muncul secara real-time ketika sistem mendeteksi aktivitas bicara dari peserta ujian selama ujian.
           </p>
         </div>
       ) : filteredRecordings.length === 0 ? (

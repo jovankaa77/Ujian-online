@@ -146,7 +146,7 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
     <div>
       <Modal 
         isOpen={!!selectedPhoto} 
-        title={`Foto Absen - ${selectedPhoto?.studentName || 'Siswa'}`}
+        title={`Foto Absen - ${selectedPhoto?.studentName || 'Peserta Ujian'}`}
         onCancel={() => setSelectedPhoto(null)}
         cancelText="Tutup"
       >
@@ -184,14 +184,14 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
         <div className="flex items-center space-x-4">
           <div className="flex-grow">
             <label htmlFor="search" className="block text-sm font-medium text-gray-300 mb-2">
-              🔍 Cari Siswa (Nama, NIM, Kelas, atau Jurusan)
+              Cari Peserta Ujian (Nama, NIM, Kelas, atau Jurusan)
             </label>
             <input
               id="search"
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Ketik nama, NIM, kelas, atau jurusan siswa..."
+              placeholder="Ketik nama, NIM, kelas, atau jurusan peserta ujian..."
               className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
@@ -206,7 +206,7 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
         </div>
         {searchTerm && (
           <div className="mt-3 text-sm text-gray-400">
-            Menampilkan {filteredSessions.length} dari {sessions.length} siswa
+            Menampilkan {filteredSessions.length} dari {sessions.length} peserta ujian
             {filteredSessions.length > 0 && (
               <span className="ml-2 text-blue-400">
                 untuk "{searchTerm}"
@@ -220,7 +220,7 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
       <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-blue-600 p-4 rounded-lg text-center">
           <div className="text-2xl font-bold">{sessions.length}</div>
-          <div className="text-sm">Total Siswa</div>
+          <div className="text-sm">Total Peserta Ujian</div>
         </div>
         <div className="bg-green-600 p-4 rounded-lg text-center">
           <div className="text-2xl font-bold">
@@ -240,19 +240,19 @@ const TeacherAttendanceRecap: React.FC<TeacherAttendanceRecapProps> = ({ navigat
       
       {sessions.length === 0 ? (
         <p className="text-gray-400 text-center mt-8 bg-gray-800 p-6 rounded-lg">
-          Belum ada siswa yang bergabung dalam ujian ini.
+          Belum ada peserta ujian yang bergabung dalam ujian ini.
         </p>
       ) : filteredSessions.length === 0 ? (
         <div className="text-center mt-8 bg-gray-800 p-6 rounded-lg">
           <p className="text-yellow-400 text-lg mb-2">🔍 Tidak ada hasil</p>
           <p className="text-gray-400">
-            Tidak ditemukan siswa dengan nama, NIM, kelas, atau jurusan "{searchTerm}"
+            Tidak ditemukan peserta ujian dengan nama, NIM, kelas, atau jurusan "{searchTerm}"
           </p>
           <button
             onClick={() => setSearchTerm('')}
             className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg"
           >
-            Tampilkan Semua Siswa
+            Tampilkan Semua Peserta Ujian
           </button>
         </div>
       ) : (

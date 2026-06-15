@@ -29,13 +29,13 @@ const HomePage: React.FC<HomePageProps> = ({ navigateTo, navigateBack, canGoBack
           onClick={() => navigateTo('teacher_dashboard', { currentUser: { id: 'teacher_default', role: 'teacher' } })}
           className="flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105"
         >
-          <LockIcon /> Saya Dosen
+          <LockIcon /> Saya Pengawas
         </button>
         <button 
           onClick={() => navigateTo('student_auth_choice')} 
           className="flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105"
         >
-          <UserIcon /> Saya Siswa
+          <UserIcon /> Saya Peserta Ujian
         </button>
       </div>
     </div>

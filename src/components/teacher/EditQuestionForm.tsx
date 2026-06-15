@@ -223,7 +223,7 @@ const EditQuestionForm: React.FC<EditQuestionFormProps> = ({ question, onSave, o
               ))}
             </select>
             <p className="text-xs text-gray-400">
-              Siswa akan menulis kode dalam bahasa {LANGUAGE_LABELS[selectedLanguage]} dan dapat menjalankannya.
+              Peserta ujian akan menulis kode dalam bahasa {LANGUAGE_LABELS[selectedLanguage]} dan dapat menjalankannya.
             </p>
           </div>
         )}

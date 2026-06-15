@@ -185,7 +185,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
 
     doc.setFontSize(9);
     doc.setTextColor(200, 200, 200);
-    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}  |  Total Siswa: ${filteredSessions.length}`, pageWidth / 2, 33, { align: 'center' });
+    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}  |  Total Peserta Ujian: ${filteredSessions.length}`, pageWidth / 2, 33, { align: 'center' });
 
     const dataToExport = filteredSessions.map((session, idx) => {
       const violationsList = getViolationsList(session);
@@ -301,21 +301,21 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
       </button>
       
       <h2 className="text-3xl font-bold">Awasi Ujian</h2>
-      <p className="text-lg text-blue-400 mb-6">{exam.name} ({exam.code}) - Monitoring pelanggaran siswa</p>
+      <p className="text-lg text-blue-400 mb-6">{exam.name} ({exam.code}) - Monitoring pelanggaran peserta ujian</p>
       
       {/* Search Bar */}
       <div className="mb-6 bg-gray-800 p-4 rounded-lg shadow-lg">
         <div className="flex items-center space-x-4">
           <div className="flex-grow">
             <label htmlFor="search" className="block text-sm font-medium text-gray-300 mb-2">
-              Cari Siswa (Nama, NIM, Kelas, atau Jurusan)
+              Cari Peserta Ujian (Nama, NIM, Kelas, atau Jurusan)
             </label>
             <input
               id="search"
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Ketik nama, NIM, kelas, atau jurusan siswa..."
+              placeholder="Ketik nama, NIM, kelas, atau jurusan peserta ujian..."
               className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
@@ -345,7 +345,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         </div>
         {searchTerm && (
           <div className="mt-3 text-sm text-gray-400">
-            Menampilkan {filteredSessions.length} dari {sessions.length} siswa
+            Menampilkan {filteredSessions.length} dari {sessions.length} peserta ujian
             {filteredSessions.length > 0 && (
               <span className="ml-2 text-blue-400">
                 untuk "{searchTerm}"
@@ -355,26 +355,26 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         )}
         {hasMoreData && (
           <div className="mt-3 text-sm text-yellow-400">
-            Menampilkan {sessions.length} siswa (Halaman {currentPage}) - Ada data lainnya
+            Menampilkan {sessions.length} peserta ujian (Halaman {currentPage}) - Ada data lainnya
           </div>
         )}
       </div>
       
       {sessions.length === 0 ? (
         <p className="text-gray-400 text-center mt-8 bg-gray-800 p-6 rounded-lg">
-          Belum ada siswa yang bergabung dalam ujian ini.
+          Belum ada peserta ujian yang bergabung dalam ujian ini.
         </p>
       ) : filteredSessions.length === 0 ? (
         <div className="text-center mt-8 bg-gray-800 p-6 rounded-lg">
           <p className="text-yellow-400 text-lg mb-2">Tidak ada hasil</p>
           <p className="text-gray-400">
-            Tidak ditemukan siswa dengan nama, NIM, kelas, atau jurusan "{searchTerm}"
+            Tidak ditemukan peserta ujian dengan nama, NIM, kelas, atau jurusan "{searchTerm}"
           </p>
           <button
             onClick={() => setSearchTerm('')}
             className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
           >
-            Tampilkan Semua Siswa
+            Tampilkan Semua Peserta Ujian
           </button>
         </div>
       ) : (
@@ -469,7 +469,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
           {hasMoreData && (
             <div className="mt-8 bg-gray-800 p-6 rounded-lg text-center">
               <div className="mb-4 text-sm text-gray-400">
-                Menampilkan {sessions.length} siswa dari total yang ada (Halaman {currentPage})
+                Menampilkan {sessions.length} peserta ujian dari total yang ada (Halaman {currentPage})
               </div>
               <button
                 onClick={() => loadSessions(false)}
@@ -483,7 +483,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
                   </>
                 ) : (
                   <>
-                    Muat Lebih Banyak Siswa ({SESSIONS_PER_PAGE} siswa)
+                    Muat Lebih Banyak Peserta Ujian ({SESSIONS_PER_PAGE} peserta ujian)
                   </>
                 )}
               </button>

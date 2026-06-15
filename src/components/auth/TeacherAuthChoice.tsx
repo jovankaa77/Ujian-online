@@ -15,12 +15,12 @@ const TeacherAuthChoice: React.FC<TeacherAuthChoiceProps> = ({ navigateTo, navig
         &larr; Kembali
       </button>
       
-      <h2 className="text-3xl font-bold mb-8">Portal Dosen</h2>
+      <h2 className="text-3xl font-bold mb-8">Portal Pengawas</h2>
       <button 
         onClick={() => navigateTo('teacher_dashboard', { currentUser: { id: 'teacher_default', role: 'teacher' } })}
         className="w-64 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg"
       >
-        Masuk ke Dashboard Dosen
+        Masuk ke Dashboard Pengawas
       </button>
     </div>
   );

@@ -73,7 +73,7 @@ const StudentLogin: React.FC<StudentLoginProps> = ({ navigateTo, navigateBack })
       >
         &larr; Kembali
       </button>
-      <h2 className="text-3xl font-bold mb-6 text-center">Login Siswa</h2>
+      <h2 className="text-3xl font-bold mb-6 text-center">Login Peserta Ujian</h2>
       <div className="w-full max-w-md mx-auto bg-gray-800 p-8 rounded-lg shadow-xl">
         <form onSubmit={handleSubmit} className="space-y-4">
           <input 

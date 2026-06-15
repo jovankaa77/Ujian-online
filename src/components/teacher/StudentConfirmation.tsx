@@ -164,10 +164,10 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
       setSelectedStudents(new Set());
       
       // Show success message
-      alert(`${selectedStudents.size} siswa berhasil disetujui!`);
+      alert(`${selectedStudents.size} peserta ujian berhasil disetujui!`);
     } catch (error) {
       console.error('Error approving students:', error);
-      alert('Gagal menyetujui siswa. Silakan coba lagi.');
+      alert('Gagal menyetujui peserta ujian. Silakan coba lagi.');
     } finally {
       setIsLoading(false);
     }
@@ -185,10 +185,10 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
       setSelectedStudents(new Set());
       
       // Show success message
-      alert(`${selectedStudents.size} siswa berhasil ditolak!`);
+      alert(`${selectedStudents.size} peserta ujian berhasil ditolak!`);
     } catch (error) {
       console.error('Error rejecting students:', error);
-      alert('Gagal menolak siswa. Silakan coba lagi.');
+      alert('Gagal menolak peserta ujian. Silakan coba lagi.');
     } finally {
       setIsLoading(false);
     }
@@ -244,7 +244,7 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
       await updateDoc(appRef, { status: newStatus });
       
       setEditingApplication(null);
-      alert(`Status siswa ${editingApplication.studentData.fullName} berhasil diubah menjadi ${
+      alert(`Status peserta ujian ${editingApplication.studentData.fullName} berhasil diubah menjadi ${
         newStatus === 'pending' ? 'Menunggu' :
         newStatus === 'approved' ? 'Disetujui' : 'Ditolak'
       }!`);
@@ -309,7 +309,7 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
 
       <Modal
         isOpen={!!editingApplication}
-        title="Edit Status Siswa"
+        title="Edit Status Peserta Ujian"
         onCancel={() => setEditingApplication(null)}
         onConfirm={handleSaveStatus}
         confirmText={isUpdatingStatus ? 'Menyimpan...' : 'Simpan Status'}
@@ -340,7 +340,7 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
             
             <div className="bg-blue-900 border border-blue-500 p-3 rounded-md">
               <p className="text-blue-300 text-sm">
-                💡 <strong>Info:</strong> Mengubah status akan langsung mempengaruhi akses siswa ke ujian.
+                💡 <strong>Info:</strong> Mengubah status akan langsung mempengaruhi akses peserta ujian ke ujian.
               </p>
             </div>
           </div>
@@ -355,7 +355,7 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
       </button>
       
       <div className="mb-6">
-        <h2 className="text-3xl font-bold mb-2">Konfirmasi Siswa</h2>
+        <h2 className="text-3xl font-bold mb-2">Konfirmasi Peserta Ujian</h2>
         <p className="text-lg text-indigo-400 mb-4">{exam.name} ({exam.code})</p>
         
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -432,7 +432,7 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
       <div className="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
         {applications.length === 0 ? (
           <div className="text-center p-8 text-gray-400">
-            Belum ada siswa yang mengajukan untuk ujian ini.
+            Belum ada peserta ujian yang mengajukan untuk ujian ini.
           </div>
         ) : (
           <>

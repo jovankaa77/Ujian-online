@@ -571,14 +571,14 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
         {/* Search Bar */}
         <div className="mb-4">
           <label htmlFor="search" className="block text-sm font-medium text-gray-300 mb-2">
-            Cari Siswa (Nama, NIM, Kelas, atau Jurusan)
+            Cari Peserta Ujian (Nama, NIM, Kelas, atau Jurusan)
           </label>
           <input
             id="search"
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Ketik nama, NIM, kelas, atau jurusan siswa..."
+            placeholder="Ketik nama, NIM, kelas, atau jurusan peserta ujian..."
             className="w-full p-3 bg-gray-700 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
         </div>
@@ -636,7 +636,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
         {/* Filter Summary */}
         <div className="mt-4 flex justify-between items-center text-sm text-gray-400">
           <div>
-            Menampilkan {filteredSessions.length} dari {sessions.length} siswa
+            Menampilkan {filteredSessions.length} dari {sessions.length} peserta ujian
             {hasMoreData && (
               <span className="ml-2 text-yellow-400">
                 (Halaman {currentPage}, ada data lainnya)
@@ -771,7 +771,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                                     )}
                                     <div className="text-sm space-y-1">
                                       <div className="text-red-300">
-                                        Jawaban Siswa: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
+                                        Jawaban Peserta Ujian: <span className="font-bold">{String.fromCharCode(65 + studentAnswer)}</span>
                                         {q.options?.[studentAnswer] && ` - ${q.options[studentAnswer]}`}
                                       </div>
                                       <div className="text-green-300">
@@ -965,7 +965,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
               {/* Essay Answers Tab */}
               {editModalTab === 'essay' && (
                 <div className="space-y-4">
-                  <p className="text-sm text-gray-400">Edit jawaban essay siswa. Perubahan akan tersimpan ke database.</p>
+                  <p className="text-sm text-gray-400">Edit jawaban essay peserta ujian. Perubahan akan tersimpan ke database.</p>
                   {questions.filter(q => q.type === 'essay').length === 0 && (
                     <p className="text-center text-gray-500 py-8">Tidak ada soal essay.</p>
                   )}
@@ -983,7 +983,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                           onChange={e => setEditingEssayAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
                           rows={4}
                           className="w-full p-3 bg-gray-800 rounded border border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
-                          placeholder="Jawaban essay siswa..."
+                          placeholder="Jawaban essay peserta ujian..."
                         />
                       </div>
                     );
@@ -1106,8 +1106,8 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
               <tr>
                 <td colSpan={13} className="text-center p-8 text-gray-400">
                   {sessions.length === 0 
-                    ? "Belum ada siswa yang menyelesaikan ujian."
-                    : "Tidak ada siswa yang sesuai dengan filter."
+                    ? "Belum ada peserta ujian yang menyelesaikan ujian."
+                    : "Tidak ada peserta ujian yang sesuai dengan filter."
                   }
                 </td>
               </tr>
@@ -1198,7 +1198,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           <div className="p-6 bg-gray-700 border-t border-gray-600">
             <div className="flex justify-between items-center">
               <div className="text-sm text-gray-400">
-                Menampilkan {sessions.length} siswa (Halaman {currentPage})
+                Menampilkan {sessions.length} peserta ujian (Halaman {currentPage})
                 <button
                   onClick={() => loadSessions(true)}
                   className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-3 rounded"
@@ -1218,7 +1218,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                   </>
                 ) : (
                   <>
-                    📄 Muat Lebih Banyak ({SESSIONS_PER_PAGE} siswa)
+                    📄 Muat Lebih Banyak ({SESSIONS_PER_PAGE} peserta ujian)
                   </>
                 )}
               </button>

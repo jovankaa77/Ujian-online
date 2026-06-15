@@ -1435,7 +1435,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
               Nilai Pilihan Ganda Anda: <span className="text-green-400">{finalScore?.toFixed(2)}</span>
             </p>
             <p className="text-lg text-gray-400 mt-2">
-              Nilai esai dan live code (jika ada) akan diperiksa oleh dosen.
+              Nilai esai dan live code (jika ada) akan diperiksa oleh pengawas.
             </p>
             <button 
               onClick={() => navigateTo('student_dashboard', { currentUser: user, clearHistory: true })}
@@ -1673,7 +1673,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         <div className="text-center p-8 mt-8 bg-gray-800 rounded-lg">
           <h3 className="text-2xl font-bold text-yellow-400 mb-4">Ujian Belum Siap</h3>
           <p className="text-gray-300">
-            Tidak ada soal yang tersedia untuk ujian ini. Silakan hubungi dosen atau pengawas ujian Anda.
+            Tidak ada soal yang tersedia untuk ujian ini. Silakan hubungi pengawas ujian Anda.
           </p>
         </div>
       ) : (

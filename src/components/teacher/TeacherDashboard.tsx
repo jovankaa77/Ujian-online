@@ -275,7 +275,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
           &larr; Kembali
         </button>
       )}
-      <h2 className="text-3xl font-bold mb-6">Dasbor Dosen</h2>
+      <h2 className="text-3xl font-bold mb-6">Dasbor Pengawas</h2>
       <div className="flex space-x-4 mb-6 border-b border-gray-700 overflow-x-auto">
         <button
           onClick={() => setView('search')}
@@ -400,7 +400,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                   onClick={() => handleNavigateToFeature('student_confirmation', { exam: foundExam })} 
                   className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold py-2 px-3 rounded-lg"
                 >
-                  Konfirmasi Siswa
+                  Konfirmasi Peserta Ujian
                 </button>
                 <button 
                   onClick={() => handleNavigateToFeature('teacher_results', { exam: foundExam })} 
@@ -502,7 +502,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                   <div className="bg-yellow-900 border border-yellow-500 p-3 rounded-md">
                     <p className="text-yellow-300 text-sm">
                       ⚠️ <strong>Peringatan:</strong> Mengubah password akan mempengaruhi akses ke ujian ini. 
-                      Pastikan untuk memberitahu siswa jika diperlukan.
+                      Pastikan untuk memberitahu peserta ujian jika diperlukan.
                     </p>
                   </div>
                   
@@ -588,7 +588,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                   <div className="bg-yellow-900 border border-yellow-500 p-3 rounded-md">
                     <p className="text-yellow-300 text-sm">
                       ⚠️ <strong>Peringatan:</strong> Mengubah jadwal ujian akan mempengaruhi akses siswa. 
-                      Pastikan untuk memberitahu siswa tentang perubahan jadwal.
+                      Pastikan untuk memberitahu peserta ujian tentang perubahan jadwal.
                     </p>
                   </div>
                   
@@ -597,9 +597,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, navigateTo, n
                       💡 <strong>Tips:</strong>
                     </p>
                     <ul className="text-blue-200 text-xs mt-1 space-y-1">
-                      <li>• Siswa hanya bisa mengakses ujian pada waktu yang telah ditentukan</li>
+                      <li>• Peserta ujian hanya bisa mengakses ujian pada waktu yang telah ditentukan</li>
                       <li>• Jika ujian sedang berlangsung, perubahan akan berlaku segera</li>
-                      <li>• Pastikan durasi ujian cukup untuk siswa menyelesaikan soal</li>
+                      <li>• Pastikan durasi ujian cukup untuk peserta ujian menyelesaikan soal</li>
                     </ul>
                   </div>
                   

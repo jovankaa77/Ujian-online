@@ -225,7 +225,7 @@ const AddQuestionForm: React.FC<AddQuestionFormProps> = ({ examId }) => {
               ))}
             </select>
             <p className="text-xs text-gray-400">
-              Siswa akan menulis kode dalam bahasa {LANGUAGE_LABELS[selectedLanguage]} dan dapat menjalankannya untuk melihat output.
+              Peserta ujian akan menulis kode dalam bahasa {LANGUAGE_LABELS[selectedLanguage]} dan dapat menjalankannya untuk melihat output.
             </p>
           </div>
         )}

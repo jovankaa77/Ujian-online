@@ -287,7 +287,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
         <>
           <div className="mb-4">
             <p className="text-gray-400">
-              Menampilkan <span className="font-bold text-white">{filteredGrouped.length}</span> siswa
+              Menampilkan <span className="font-bold text-white">{filteredGrouped.length}</span> peserta ujian
               {' '}dengan total <span className="font-bold text-white">{totalViolations}</span> pelanggaran
             </p>
           </div>
@@ -315,7 +315,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
               <p className="text-sm text-gray-500 mt-2">
                 {searchTerm
                   ? 'Coba ubah kata kunci pencarian'
-                  : 'Semua siswa mengikuti ujian dengan baik'}
+                  : 'Semua peserta ujian mengikuti ujian dengan baik'}
               </p>
             </div>
           ) : (
@@ -366,7 +366,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
               <p className="text-sm text-gray-500 mt-2">
                 {searchTerm
                   ? 'Coba ubah kata kunci pencarian'
-                  : 'Foto verifikasi akan muncul saat siswa memulai ujian'}
+                  : 'Foto verifikasi akan muncul saat peserta ujian memulai ujian'}
               </p>
             </div>
           ) : (
@@ -449,7 +449,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
             <p className="text-sm text-gray-400 mb-5 bg-gray-700/50 rounded-lg p-3">
               {confirmDelete.type === 'violation'
                 ? 'Data pelanggaran ini akan dihapus permanen dan tidak dapat dikembalikan.'
-                : 'Foto verifikasi wajah siswa ini akan dihapus. Siswa perlu melakukan verifikasi ulang saat ujian berikutnya.'}
+                : 'Foto verifikasi wajah peserta ujian ini akan dihapus. Peserta ujian perlu melakukan verifikasi ulang saat ujian berikutnya.'}
             </p>
             <div className="flex gap-3 justify-end">
               <button

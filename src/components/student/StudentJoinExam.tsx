@@ -64,7 +64,7 @@ const StudentJoinExam: React.FC<StudentJoinExamProps> = ({ user, navigateTo, nav
       // Get student profile
       const studentDoc = await getDoc(doc(db, `artifacts/${appId}/public/data/students`, user.id));
       if (!studentDoc.exists()) {
-        setError('Profil siswa tidak ditemukan. Silakan logout dan login kembali.');
+        setError('Profil peserta ujian tidak ditemukan. Silakan logout dan login kembali.');
         setIsLoading(false);
         return;
       }

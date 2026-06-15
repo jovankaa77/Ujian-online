@@ -542,7 +542,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
       <div className="mt-3 space-y-3">
         <div className="rounded-lg border border-gray-600 overflow-hidden bg-gray-900">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-600">
-            <span className="text-sm font-bold text-gray-300">Kode Siswa - HTML, CSS Dan Javascript</span>
+            <span className="text-sm font-bold text-gray-300">Kode Peserta Ujian - HTML, CSS Dan Javascript</span>
             <button
               onClick={() => setHtmlPreviews(prev => {
                 const newPreviews = { ...prev };
@@ -690,7 +690,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
                     <img src={q.image} alt="Soal" className="max-h-40 mt-2 rounded" />
                   )}
                   <div className="mt-3 p-4 bg-gray-900 rounded-md">
-                    <p className="text-sm text-gray-400 mb-1">Jawaban Siswa:</p>
+                    <p className="text-sm text-gray-400 mb-1">Jawaban Peserta Ujian:</p>
                     <p className="whitespace-pre-wrap">
                       {session.answers[q.id] || '(Tidak dijawab)'}
                     </p>
@@ -746,7 +746,7 @@ const EssayGradingView: React.FC<EssayGradingViewProps> = ({ session, questions,
 
                   {!isHtmlCss && (
                     <div className="mt-3">
-                      <p className="text-sm text-gray-400 mb-2">Kode Siswa:</p>
+                      <p className="text-sm text-gray-400 mb-2">Kode Peserta Ujian:</p>
                       {session.answers[q.id] ? (
                         <div className="rounded-lg overflow-hidden border border-gray-500 shadow-lg">
                           <Editor

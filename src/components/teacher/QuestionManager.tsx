@@ -129,7 +129,7 @@ const QuestionManager: React.FC<QuestionManagerProps> = ({ navigateBack, appStat
           {currentExam.status === 'draft' && (
             <>
               <div className="mt-2 bg-yellow-900 border border-yellow-500 text-yellow-300 text-xs p-2 rounded-md">
-                **Penting:** Ujian belum bisa diakses siswa. Klik "Publikasikan" jika semua soal sudah siap.
+                **Penting:** Ujian belum bisa diakses peserta ujian. Klik "Publikasikan" jika semua soal sudah siap.
               </div>
               <button
                 onClick={publishExam}

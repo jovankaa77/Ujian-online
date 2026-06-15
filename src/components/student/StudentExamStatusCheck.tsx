@@ -22,7 +22,7 @@ const StudentExamStatusCheck: React.FC<StudentExamStatusCheckProps> = ({ navigat
       console.log("Exam end:", endTime.toISOString());
       console.log("Exam status:", exam.status);
       if (exam.status !== 'published') {
-        setStatusMessage(`Ujian "${exam.name}" belum dipublikasikan oleh dosen.`);
+        setStatusMessage(`Ujian "${exam.name}" belum dipublikasikan oleh pengawas.`);
       } else if (now < startTime) {
         setStatusMessage(`Ujian belum dimulai. Ujian akan dibuka pada ${startTime.toLocaleString('id-ID')}.`);
       } else if (now > endTime) {

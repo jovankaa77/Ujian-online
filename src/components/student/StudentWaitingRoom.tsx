@@ -83,10 +83,10 @@ const StudentWaitingRoom: React.FC<StudentWaitingRoomProps> = ({ user, navigateT
           <h3 className="text-xl font-bold text-yellow-400 mb-2">⏳ Menunggu Konfirmasi</h3>
           <p className="text-gray-300">
             Aplikasi Anda untuk ujian "<span className="font-bold">{examData?.name}</span>" 
-            sedang menunggu konfirmasi dari dosen.
+            sedang menunggu konfirmasi dari pengawas.
           </p>
           <p className="text-sm text-gray-400 mt-2">
-            Silakan tunggu hingga dosen mengkonfirmasi aplikasi Anda.
+            Silakan tunggu hingga pengawas mengkonfirmasi aplikasi Anda.
           </p>
         </div>
       );
@@ -98,10 +98,10 @@ const StudentWaitingRoom: React.FC<StudentWaitingRoomProps> = ({ user, navigateT
           <h3 className="text-xl font-bold text-red-400 mb-2">❌ Aplikasi Ditolak</h3>
           <p className="text-gray-300">
             Maaf, aplikasi Anda untuk ujian "<span className="font-bold">{examData?.name}</span>" 
-            telah ditolak oleh dosen.
+            telah ditolak oleh pengawas.
           </p>
           <p className="text-sm text-gray-400 mt-2">
-            Silakan hubungi dosen untuk informasi lebih lanjut.
+            Silakan hubungi pengawas untuk informasi lebih lanjut.
           </p>
         </div>
       );
@@ -121,7 +121,7 @@ const StudentWaitingRoom: React.FC<StudentWaitingRoomProps> = ({ user, navigateT
               telah disetujui!
             </p>
             <p className="text-sm text-yellow-400 mt-2">
-              Ujian belum dipublikasikan oleh dosen. Silakan tunggu hingga ujian siap dimulai.
+              Ujian belum dipublikasikan oleh pengawas. Silakan tunggu hingga ujian siap dimulai.
             </p>
           </div>
         );

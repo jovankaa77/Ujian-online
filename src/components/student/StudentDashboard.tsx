@@ -296,7 +296,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
     // Check if any document found is not the current user
     const duplicateNIM = nimSnapshot.docs.find(doc => doc.id !== user.id);
     if (duplicateNIM) {
-      errors.nim = "NIM/NIS sudah terdaftar oleh siswa lain. Gunakan NIM/NIS yang berbeda.";
+      errors.nim = "NIM/NIS sudah terdaftar oleh peserta ujian lain. Gunakan NIM/NIS yang berbeda.";
     }
     
     return errors;
@@ -390,7 +390,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
       </div>
       
       <div className="mb-8">
-        <h2 className="text-3xl font-bold mb-4">Dashboard Siswa</h2>
+        <h2 className="text-3xl font-bold mb-4">Dashboard Peserta Ujian</h2>
         {studentProfile && (
           <div className="bg-gray-800 p-6 rounded-lg shadow-xl">
             <div className="flex items-center justify-between">
@@ -440,7 +440,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
             <div className="mb-6 bg-yellow-900 border border-yellow-500 p-4 rounded-lg">
               <h4 className="text-yellow-300 font-bold mb-2">⚠️ Catatan Penting:</h4>
               <ul className="text-yellow-200 text-sm space-y-1">
-                <li>• NIM/NIS harus unik dan tidak boleh sama dengan siswa lain</li>
+                <li>• NIM/NIS harus unik dan tidak boleh sama dengan peserta ujian lain</li>
                 <li>• Username tidak dapat diubah setelah registrasi</li>
                 <li>• Password baru minimal 6 karakter (kosongkan jika tidak ingin mengubah)</li>
                 <li>• Pastikan semua data yang dimasukkan benar dan valid</li>
@@ -744,7 +744,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                         return (
                           <div className="bg-yellow-900 border border-yellow-600 p-3 rounded-md mb-3">
                             <p className="text-yellow-200 text-sm text-center">
-                              📝 Ujian belum dipublikasi oleh dosen
+                              📝 Ujian belum dipublikasi oleh pengawas
                             </p>
                           </div>
                         );
@@ -785,7 +785,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
               <div>
                 <h4 className="text-xl font-bold text-purple-400">Aplikasi Disetujui</h4>
                 <p className="text-purple-200 text-sm">
-                  Aplikasi disetujui, menunggu publikasi ujian oleh dosen
+                  Aplikasi disetujui, menunggu publikasi ujian oleh pengawas
                 </p>
               </div>
             </div>
@@ -817,7 +817,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                     <p className="text-purple-200 text-sm text-center">
                       📝 Aplikasi Anda untuk ujian "<strong>{exam.name}</strong>" telah disetujui!
                       <br/><br/>
-                      Ujian belum dipublikasikan oleh dosen. Silakan tunggu hingga ujian siap dimulai.
+                      Ujian belum dipublikasikan oleh pengawas. Silakan tunggu hingga ujian siap dimulai.
                     </p>
                   </div>
                 </div>
@@ -835,12 +835,12 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
               </div>
               <div>
                 <h4 className="text-xl font-bold text-yellow-400">
-                  {pendingApplications.length === 1 ? 'Menunggu Konfirmasi Dosen' : `${pendingApplications.length} Ujian Menunggu Konfirmasi`}
+                  {pendingApplications.length === 1 ? 'Menunggu Konfirmasi Pengawas' : `${pendingApplications.length} Ujian Menunggu Konfirmasi`}
                 </h4>
                 <p className="text-yellow-200 text-sm">
                   {pendingApplications.length === 1 
-                    ? 'Aplikasi ujian yang sedang menunggu persetujuan dosen'
-                    : 'Beberapa aplikasi ujian sedang menunggu persetujuan dosen'}
+                    ? 'Aplikasi ujian yang sedang menunggu persetujuan pengawas'
+                    : 'Beberapa aplikasi ujian sedang menunggu persetujuan pengawas'}
                 </p>
               </div>
             </div>
@@ -870,7 +870,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                   </div>
                   <div className="bg-yellow-900 border border-yellow-600 p-3 rounded-md">
                     <p className="text-yellow-200 text-sm text-center">
-                      💡 Menunggu persetujuan dari dosen. Silakan tunggu konfirmasi.
+                      💡 Menunggu persetujuan dari pengawas. Silakan tunggu konfirmasi.
                     </p>
                   </div>
                 </div>
@@ -894,8 +894,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                 </h4>
                 <p className="text-red-200 text-sm">
                   {rejectedApplications.filter(app => app.specialStatus !== 'approved_unpublished').length === 1
-                    ? 'Aplikasi ujian yang ditolak oleh dosen'
-                    : 'Beberapa aplikasi ujian ditolak oleh dosen'}
+                    ? 'Aplikasi ujian yang ditolak oleh pengawas'
+                    : 'Beberapa aplikasi ujian ditolak oleh pengawas'}
                 </p>
               </div>
             </div>
@@ -925,7 +925,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                   </div>
                   <div className="bg-red-900 border border-red-600 p-3 rounded-md">
                     <p className="text-red-200 text-sm text-center">
-                      💬 Hubungi dosen untuk informasi lebih lanjut
+                      💬 Hubungi pengawas untuk informasi lebih lanjut
                     </p>
                   </div>
                 </div>

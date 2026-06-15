@@ -52,7 +52,7 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
 
       await setDoc(doc(db, `artifacts/${appId}/public/data/teachers`, teacherId), teacherData);
 
-      alert('Akun dosen berhasil dibuat! Silakan login.');
+      alert('Akun pengawas berhasil dibuat! Silakan login.');
       navigateTo('teacher_login');
     } catch (error: any) {
       setError('Gagal membuat akun. Silakan coba lagi.');
@@ -69,7 +69,7 @@ const TeacherRegister: React.FC<TeacherRegisterProps> = ({ navigateTo, navigateB
       >
         &larr; Kembali
       </button>
-      <h2 className="text-3xl font-bold mb-6 text-center">Daftar Akun Dosen</h2>
+      <h2 className="text-3xl font-bold mb-6 text-center">Daftar Akun Pengawas</h2>
       <div className="w-full max-w-md mx-auto bg-gray-800 p-8 rounded-lg shadow-xl">
         <form onSubmit={handleSubmit} className="space-y-4">
           <input 
