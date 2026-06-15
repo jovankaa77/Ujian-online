@@ -26,7 +26,7 @@ const HomePage: React.FC<HomePageProps> = ({ navigateTo, navigateBack, canGoBack
       </p>
       <div className="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-6">
         <button 
-          onClick={() => navigateTo('teacher_auth_choice')} 
+          onClick={() => navigateTo('teacher_dashboard', { currentUser: { id: 'teacher_default', role: 'teacher' } })}
           className="flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105"
         >
           <LockIcon /> Saya Dosen
