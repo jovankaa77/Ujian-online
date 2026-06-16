@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { collection, getDocs, query, limit, startAfter, orderBy, DocumentSnapshot } from 'firebase/firestore';
+import React, { useState, useEffect, useCallback } from 'react';
+import { collection, getDocs, query, limit, startAfter, orderBy, DocumentSnapshot, getCountFromServer } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -37,77 +37,75 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredSessions, setFilteredSessions] = useState<Session[]>([]);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMoreData, setHasMoreData] = useState(true);
-  const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const SESSIONS_PER_PAGE = 30;
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageCursors, setPageCursors] = useState<(DocumentSnapshot | null)[]>([null]);
+  const SESSIONS_PER_PAGE = 50;
+  const totalPages = Math.ceil(totalCount / SESSIONS_PER_PAGE);
 
-  const handleBackNavigation = () => {
-    navigateBack();
+  const handleBackNavigation = () => { navigateBack(); };
+
+  const loadPage = useCallback(async (page: number, cursors: (DocumentSnapshot | null)[]) => {
+    if (!exam?.id) return;
+    setIsPageLoading(true);
+    try {
+      const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+      const cursor = cursors[page - 1] ?? null;
+      let q = query(sessionsRef, orderBy('startTime', 'desc'), limit(SESSIONS_PER_PAGE));
+      if (cursor) q = query(sessionsRef, orderBy('startTime', 'desc'), startAfter(cursor), limit(SESSIONS_PER_PAGE));
+      const snapshot = await getDocs(q);
+      const newSessions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Session));
+      setSessions(newSessions);
+      if (snapshot.docs.length > 0) {
+        setPageCursors(prev => {
+          const updated = [...prev];
+          updated[page] = snapshot.docs[snapshot.docs.length - 1];
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error('Error loading sessions:', err);
+    } finally {
+      setIsPageLoading(false);
+    }
+  }, [exam?.id]);
+
+  const loadTotalCount = useCallback(async () => {
+    if (!exam?.id) return;
+    const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+    const snap = await getCountFromServer(query(sessionsRef));
+    setTotalCount(snap.data().count);
+  }, [exam?.id]);
+
+  const fetchAllSessionsForExport = async (): Promise<Session[]> => {
+    if (!exam?.id) return [];
+    const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+    const all: Session[] = [];
+    let lastSnap: DocumentSnapshot | null = null;
+    while (true) {
+      let q = query(sessionsRef, orderBy('startTime', 'desc'), limit(500));
+      if (lastSnap) q = query(sessionsRef, orderBy('startTime', 'desc'), startAfter(lastSnap), limit(500));
+      const snapshot = await getDocs(q);
+      snapshot.docs.forEach(d => all.push({ id: d.id, ...d.data() } as Session));
+      if (snapshot.docs.length < 500) break;
+      lastSnap = snapshot.docs[snapshot.docs.length - 1];
+    }
+    return all;
+  };
+
+  const goToPage = (page: number) => {
+    setCurrentPage(page);
+    loadPage(page, pageCursors);
   };
 
   useEffect(() => {
-    if (!exam?.id) return;
-    
-    // Load first page of sessions
-    loadSessions(true);
-    
-    // Set up auto-refresh every 30 seconds for real-time monitoring
-    const refreshInterval = setInterval(() => {
-      if (!isLoadingMore) {
-        loadSessions(true);
-      }
-    }, 30000);
-    
-    return () => clearInterval(refreshInterval);
-  }, [exam?.id]);
-
-  const loadSessions = async (isFirstLoad = false) => {
-    if (!exam?.id) return;
-    
-    if (!isFirstLoad && !hasMoreData) return;
-    
-    setIsLoadingMore(true);
-    
-    try {
-      const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
-      let sessionsQuery = query(
-        sessionsRef, 
-        orderBy('startTime', 'desc'),
-        limit(SESSIONS_PER_PAGE)
-      );
-      
-      if (!isFirstLoad && lastDoc) {
-        sessionsQuery = query(
-          sessionsRef,
-          orderBy('startTime', 'desc'),
-          startAfter(lastDoc),
-          limit(SESSIONS_PER_PAGE)
-        );
-      }
-      
-      const snapshot = await getDocs(sessionsQuery);
-      const newSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session));
-      
-      if (isFirstLoad) {
-        setSessions(newSessions);
-        setCurrentPage(1);
-      } else {
-        setSessions(prev => [...prev, ...newSessions]);
-        setCurrentPage(prev => prev + 1);
-      }
-      
-      // Update pagination state
-      setHasMoreData(snapshot.docs.length === SESSIONS_PER_PAGE);
-      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
-      
-    } catch (error) {
-      console.error('Error loading sessions:', error);
-    } finally {
-      setIsLoadingMore(false);
+    if (exam?.id) {
+      loadTotalCount();
+      loadPage(1, [null]);
     }
-  };
+  }, [exam?.id, loadTotalCount, loadPage]);
 
   // Filter sessions based on search term
   useEffect(() => {
@@ -166,7 +164,10 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
     return typeMap[type] || type;
   };
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
+    setIsExporting(true);
+    try {
+    const allSessions = await fetchAllSessionsForExport();
     const doc = new jsPDF('landscape', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -185,9 +186,9 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
 
     doc.setFontSize(9);
     doc.setTextColor(200, 200, 200);
-    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}  |  Total Peserta Ujian: ${filteredSessions.length}`, pageWidth / 2, 33, { align: 'center' });
+    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}  |  Total Peserta Ujian: ${allSessions.length}`, pageWidth / 2, 33, { align: 'center' });
 
-    const dataToExport = filteredSessions.map((session, idx) => {
+    const dataToExport = allSessions.map((session, idx) => {
       const violationsList = getViolationsList(session);
       const violationCount = Math.min(session.violations || 0, 5);
 
@@ -285,6 +286,11 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
     });
 
     doc.save(`Laporan_Pelanggaran_${exam.code}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error('Error generating PDF:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (!exam) {
@@ -328,24 +334,33 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
             </button>
           )}
           <button
-            onClick={() => loadSessions(true)}
-            disabled={isLoadingMore}
+            onClick={() => { loadTotalCount(); loadPage(currentPage, pageCursors); }}
+            disabled={isPageLoading}
             className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-blue-400"
           >
             Refresh
           </button>
           <button
             onClick={generatePDF}
-            disabled={filteredSessions.length === 0}
+            disabled={isExporting || totalCount === 0}
             className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download PDF
+            {isExporting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Mengekspor...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download PDF (Semua)
+              </>
+            )}
           </button>
         </div>
         {searchTerm && (
           <div className="mt-3 text-sm text-gray-400">
-            Menampilkan {filteredSessions.length} dari {sessions.length} peserta ujian
+            Menampilkan {filteredSessions.length} dari {sessions.length} peserta ujian di halaman ini
             {filteredSessions.length > 0 && (
               <span className="ml-2 text-blue-400">
                 untuk "{searchTerm}"
@@ -353,9 +368,9 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
             )}
           </div>
         )}
-        {hasMoreData && (
-          <div className="mt-3 text-sm text-yellow-400">
-            Menampilkan {sessions.length} peserta ujian (Halaman {currentPage}) - Ada data lainnya
+        {!searchTerm && totalCount > 0 && (
+          <div className="mt-3 text-sm text-gray-400">
+            Total {totalCount} peserta ujian — Halaman {currentPage} dari {totalPages || 1}
           </div>
         )}
       </div>
@@ -379,7 +394,7 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-opacity duration-150 ${isPageLoading ? 'opacity-50 pointer-events-none' : ''}`}>
             {filteredSessions.map(session => {
               const violationsList = getViolationsList(session);
               const violationCount = Math.min(session.violations || 0, 5);
@@ -464,29 +479,62 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
               );
             })}
           </div>
-          
-          {/* Pagination Controls */}
-          {hasMoreData && (
-            <div className="mt-8 bg-gray-800 p-6 rounded-lg text-center">
-              <div className="mb-4 text-sm text-gray-400">
-                Menampilkan {sessions.length} peserta ujian dari total yang ada (Halaman {currentPage})
+
+          {/* Pagination Bar */}
+          {totalPages > 1 && (
+            <div className="mt-6 bg-gray-800 p-4 rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm text-gray-400">
+                  {((currentPage - 1) * SESSIONS_PER_PAGE) + 1}–{Math.min(currentPage * SESSIONS_PER_PAGE, totalCount)} dari {totalCount} peserta ujian
+                </span>
               </div>
-              <button
-                onClick={() => loadSessions(false)}
-                disabled={isLoadingMore}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg disabled:bg-blue-400 flex items-center mx-auto"
-              >
-                {isLoadingMore ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                    Memuat Data...
-                  </>
-                ) : (
-                  <>
-                    Muat Lebih Banyak Peserta Ujian ({SESSIONS_PER_PAGE} peserta ujian)
-                  </>
-                )}
-              </button>
+              <div className="flex items-center justify-center gap-1 flex-wrap">
+                <button
+                  onClick={() => goToPage(1)}
+                  disabled={currentPage === 1 || isPageLoading}
+                  className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm"
+                >
+                  «
+                </button>
+                <button
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage === 1 || isPageLoading}
+                  className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm"
+                >
+                  ‹
+                </button>
+                {(() => {
+                  const pages: number[] = [];
+                  let start = Math.max(1, currentPage - 3);
+                  let end = Math.min(totalPages, start + 6);
+                  if (end - start < 6) start = Math.max(1, end - 6);
+                  for (let i = start; i <= end; i++) pages.push(i);
+                  return pages.map(p => (
+                    <button
+                      key={p}
+                      onClick={() => goToPage(p)}
+                      disabled={isPageLoading}
+                      className={`px-3 py-1.5 rounded text-sm ${p === currentPage ? 'bg-blue-600 text-white font-bold' : 'bg-gray-700 hover:bg-gray-600'} disabled:opacity-40`}
+                    >
+                      {p}
+                    </button>
+                  ));
+                })()}
+                <button
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage === totalPages || isPageLoading}
+                  className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm"
+                >
+                  ›
+                </button>
+                <button
+                  onClick={() => goToPage(totalPages)}
+                  disabled={currentPage === totalPages || isPageLoading}
+                  className="px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm"
+                >
+                  »
+                </button>
+              </div>
             </div>
           )}
         </>

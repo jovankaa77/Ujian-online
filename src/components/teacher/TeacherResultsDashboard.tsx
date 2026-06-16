@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { collection, getDocs, onSnapshot, query, limit, startAfter, orderBy, DocumentSnapshot, updateDoc, doc } from 'firebase/firestore';
+import React, { useState, useEffect, useCallback } from 'react';
+import { collection, getDocs, onSnapshot, query, limit, startAfter, orderBy, DocumentSnapshot, updateDoc, doc, getCountFromServer } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -59,11 +59,11 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [filterJurusan, setFilterJurusan] = useState('');
   const [availableKelas, setAvailableKelas] = useState<string[]>([]);
   const [availableJurusan, setAvailableJurusan] = useState<string[]>([]);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMoreData, setHasMoreData] = useState(true);
-  const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalSessions, setTotalSessions] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageCursors, setPageCursors] = useState<(DocumentSnapshot | null)[]>([null]);
   const SESSIONS_PER_PAGE = 50;
   const [editingScoreSession, setEditingScoreSession] = useState<Session | null>(null);
   const [scoreReduction, setScoreReduction] = useState(0);
@@ -76,99 +76,78 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editSuccess, setEditSuccess] = useState('');
 
-  const handleBackNavigation = () => {
-    navigateBack();
+  const totalPages = Math.ceil(totalCount / SESSIONS_PER_PAGE);
+
+  const handleBackNavigation = () => { navigateBack(); };
+
+  const loadPage = useCallback(async (page: number, cursors: (DocumentSnapshot | null)[]) => {
+    if (!exam?.id) return;
+    setIsPageLoading(true);
+    try {
+      const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+      const cursor = cursors[page - 1] ?? null;
+      let q = query(sessionsRef, orderBy('startTime', 'desc'), limit(SESSIONS_PER_PAGE));
+      if (cursor) q = query(sessionsRef, orderBy('startTime', 'desc'), startAfter(cursor), limit(SESSIONS_PER_PAGE));
+      const snapshot = await getDocs(q);
+      const newSessions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Session));
+      setSessions(newSessions);
+      if (snapshot.docs.length > 0) {
+        setPageCursors(prev => {
+          const updated = [...prev];
+          updated[page] = snapshot.docs[snapshot.docs.length - 1];
+          return updated;
+        });
+      }
+      // Collect filter options
+      const kelasSet = new Set<string>();
+      const jurusanSet = new Set<string>();
+      newSessions.forEach(s => {
+        if (s.studentInfo.className) kelasSet.add(s.studentInfo.className);
+        if (s.studentInfo.major) jurusanSet.add(s.studentInfo.major);
+      });
+      setAvailableKelas(Array.from(kelasSet).sort());
+      setAvailableJurusan(Array.from(jurusanSet).sort());
+    } catch (err) {
+      console.error('Error loading sessions:', err);
+    } finally {
+      setIsPageLoading(false);
+    }
+  }, [exam?.id]);
+
+  const loadTotalCount = useCallback(async () => {
+    if (!exam?.id) return;
+    const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+    const snap = await getCountFromServer(query(sessionsRef));
+    setTotalCount(snap.data().count);
+  }, [exam?.id]);
+
+  // Fetch ALL sessions for export (no pagination limit)
+  const fetchAllSessionsForExport = async (): Promise<Session[]> => {
+    if (!exam?.id) return [];
+    const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
+    const all: Session[] = [];
+    let lastSnap: DocumentSnapshot | null = null;
+    while (true) {
+      let q = query(sessionsRef, orderBy('startTime', 'desc'), limit(500));
+      if (lastSnap) q = query(sessionsRef, orderBy('startTime', 'desc'), startAfter(lastSnap), limit(500));
+      const snapshot = await getDocs(q);
+      snapshot.docs.forEach(d => all.push({ id: d.id, ...d.data() } as Session));
+      if (snapshot.docs.length < 500) break;
+      lastSnap = snapshot.docs[snapshot.docs.length - 1];
+    }
+    return all;
   };
 
   useEffect(() => {
     if (!exam?.id) return;
-    
-    // Load questions with real-time updates
     const questionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/questions`);
     const unsubscribeQuestions = onSnapshot(query(questionsRef, limit(100)), (snapshot) => {
-      setQuestions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question)));
+      setQuestions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Question)));
     });
-    
-    // Load first page of sessions with real-time updates
-    loadSessions(true);
-    
-    // Set up auto-refresh every 30 seconds for real-time monitoring
-    const refreshInterval = setInterval(() => {
-      if (!isLoadingMore) {
-        loadSessions(true);
-      }
-    }, 30000);
-    
-    return () => {
-      unsubscribeQuestions();
-      clearInterval(refreshInterval);
-    };
+    loadTotalCount();
+    loadPage(1, [null]);
+    return () => { unsubscribeQuestions(); };
   }, [exam?.id]);
-
-  const loadSessions = async (isFirstLoad = false) => {
-    if (!exam?.id) return;
-    
-    if (!isFirstLoad && !hasMoreData) return;
-    
-    setIsLoadingMore(true);
-    
-    try {
-      const sessionsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`);
-      let sessionsQuery = query(
-        sessionsRef, 
-        orderBy('startTime', 'desc'),
-        limit(SESSIONS_PER_PAGE)
-      );
-      
-      if (!isFirstLoad && lastDoc) {
-        sessionsQuery = query(
-          sessionsRef,
-          orderBy('startTime', 'desc'),
-          startAfter(lastDoc),
-          limit(SESSIONS_PER_PAGE)
-        );
-      }
-      
-      const snapshot = await getDocs(sessionsQuery);
-      const newSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Session));
-      
-      if (isFirstLoad) {
-        setSessions(newSessions);
-        setCurrentPage(1);
-      } else {
-        setSessions(prev => [...prev, ...newSessions]);
-        setCurrentPage(prev => prev + 1);
-      }
-      
-      // Update pagination state
-      setHasMoreData(snapshot.docs.length === SESSIONS_PER_PAGE);
-      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
-      
-      // Update filter options
-      const allSessions = isFirstLoad ? newSessions : [...sessions, ...newSessions];
-      const kelasSet = new Set<string>();
-      const jurusanSet = new Set<string>();
-      
-      allSessions.forEach(session => {
-        if (session.studentInfo.className) kelasSet.add(session.studentInfo.className);
-        if (session.studentInfo.major) jurusanSet.add(session.studentInfo.major);
-      });
-      
-      setAvailableKelas(Array.from(kelasSet).sort());
-      setAvailableJurusan(Array.from(jurusanSet).sort());
-      
-      if (isFirstLoad) {
-        setTotalSessions(allSessions.length);
-      }
-      
-    } catch (error) {
-      console.error('Error loading sessions:', error);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
-
-  // Filter and search logic
   useEffect(() => {
     let filtered = sessions;
     
@@ -338,171 +317,140 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
 
   const handleSaveScoreReduction = handleSaveAllEdits;
 
-  const downloadResultsPDF = () => {
-    const sessionsToExport = filteredSessions;
-    const pdfDoc = new jsPDF('landscape', 'mm', 'a4');
-    const pageWidth = pdfDoc.internal.pageSize.getWidth();
-
-    pdfDoc.setFillColor(30, 41, 59);
-    pdfDoc.rect(0, 0, pageWidth, 32, 'F');
-
-    pdfDoc.setFontSize(16);
-    pdfDoc.setTextColor(255, 255, 255);
-    pdfDoc.text(`Laporan Hasil Ujian`, 14, 14);
-
-    pdfDoc.setFontSize(10);
-    pdfDoc.setTextColor(200, 210, 230);
-    pdfDoc.text(`${exam.name} | Kode: ${exam.code}`, 14, 22);
-    pdfDoc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 28);
-    pdfDoc.text(`Total Peserta: ${sessionsToExport.length}`, pageWidth - 14, 14, { align: 'right' });
-
-    if (searchTerm || filterKelas || filterJurusan) {
-      const filters: string[] = [];
-      if (searchTerm) filters.push(`Cari: "${searchTerm}"`);
-      if (filterKelas) filters.push(`Kelas: ${filterKelas}`);
-      if (filterJurusan) filters.push(`Jurusan: ${filterJurusan}`);
-      pdfDoc.text(`Filter: ${filters.join(' | ')}`, pageWidth - 14, 22, { align: 'right' });
-    }
-
-    const tableBody = sessionsToExport.map((session, idx) => {
-      const essayQ = questions.filter(q => q.type === 'essay');
+  const buildExportRows = (allSessions: Session[], questionsData: Question[]) => {
+    return allSessions.map((session, idx) => {
+      const essayQ = questionsData.filter(q => q.type === 'essay');
       let essayVal = 'N/A';
       if (essayQ.length > 0) {
-        if (!session.essayScores) {
-          essayVal = 'Belum';
-        } else {
+        if (!session.essayScores) { essayVal = 'Belum'; }
+        else {
           const vals = Object.values(session.essayScores);
-          if (vals.length === 0) {
-            essayVal = 'Belum';
-          } else {
-            essayVal = (vals.reduce((s, v) => s + (v || 0), 0) / vals.length).toFixed(2);
-          }
+          essayVal = vals.length === 0 ? 'Belum' : (vals.reduce((s, v) => s + (v || 0), 0) / vals.length).toFixed(2);
         }
       }
-
-      const lcQ = questions.filter(q => q.type === 'livecode');
+      const lcQ = questionsData.filter(q => q.type === 'livecode');
       let lcVal = 'N/A';
       if (lcQ.length > 0) {
-        if (!session.livecodeScores) {
-          lcVal = 'Belum';
-        } else {
+        if (!session.livecodeScores) { lcVal = 'Belum'; }
+        else {
           const vals = Object.values(session.livecodeScores);
-          if (vals.length === 0) {
-            lcVal = 'Belum';
-          } else {
-            lcVal = (vals.reduce((s, v) => s + (v || 0), 0) / vals.length).toFixed(2);
-          }
+          lcVal = vals.length === 0 ? 'Belum' : (vals.reduce((s, v) => s + (v || 0), 0) / vals.length).toFixed(2);
         }
       }
-
-      return [
-        (idx + 1).toString(),
-        session.studentInfo.name || session.studentInfo.fullName || '-',
-        session.studentInfo.nim || '-',
-        session.studentInfo.major || '-',
-        session.studentInfo.className || '-',
-        session.status || '-',
-        session.violations.toString(),
-        session.finalScore?.toFixed(2) ?? '-',
-        essayVal,
-        lcVal,
-        `-${session.scoreReduction || 0}`,
-        calculateTotalScore(session),
-      ];
+      const statusText = session.status === 'finished' ? 'Selesai'
+        : session.status === 'started' ? 'Sedang Ujian' : 'Diskualifikasi';
+      const pgScore = (session.finalScore || 0).toFixed(2);
+      const reduction = session.scoreReduction || 0;
+      const totalScore = calculateTotalScore(session);
+      return {
+        no: idx + 1,
+        name: session.studentInfo.name || session.studentInfo.fullName || '-',
+        nim: session.studentInfo.nim || '-',
+        major: session.studentInfo.major || '-',
+        kelas: session.studentInfo.className || '-',
+        status: statusText,
+        violations: session.violations || 0,
+        pg: questionsData.some(q => q.type === 'mc') ? pgScore : 'N/A',
+        essay: essayVal,
+        livecode: lcVal,
+        reduction,
+        total: totalScore,
+      };
     });
+  };
 
-    autoTable(pdfDoc, {
-      startY: 36,
-      head: [['No', 'Nama', 'NIM', 'Jurusan', 'Kelas', 'Status', 'Warn', 'PG', 'Essay', 'Code', 'Mines', 'Akhir']],
-      body: tableBody,
-      theme: 'grid',
-      headStyles: {
-        fillColor: [30, 41, 59],
-        textColor: [255, 255, 255],
-        fontSize: 8,
-        fontStyle: 'bold',
-        halign: 'center',
-        cellPadding: 3,
-      },
-      bodyStyles: {
-        fontSize: 7.5,
-        cellPadding: 2.5,
-        textColor: [30, 30, 30],
-      },
-      alternateRowStyles: {
-        fillColor: [241, 245, 249],
-      },
-      columnStyles: {
-        0: { halign: 'center', cellWidth: 10 },
-        1: { cellWidth: 40 },
-        2: { cellWidth: 22 },
-        3: { cellWidth: 28 },
-        4: { cellWidth: 18 },
-        5: { halign: 'center', cellWidth: 22 },
-        6: { halign: 'center', cellWidth: 14 },
-        7: { halign: 'center', cellWidth: 16 },
-        8: { halign: 'center', cellWidth: 16 },
-        9: { halign: 'center', cellWidth: 16 },
-        10: { halign: 'center', cellWidth: 16 },
-        11: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
-      },
-      styles: {
-        lineColor: [200, 210, 220],
-        lineWidth: 0.3,
-        overflow: 'linebreak',
-      },
-      willDrawCell: (data: any) => {
-        if (data.section === 'body') {
-          if (data.column.index === 5) {
+  const downloadResultsPDF = async () => {
+    setIsExporting(true);
+    try {
+      const allSessions = await fetchAllSessionsForExport();
+      const sessionsToExport = allSessions;
+      const pdfDoc = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdfDoc.internal.pageSize.getWidth();
+
+      pdfDoc.setFillColor(30, 41, 59);
+      pdfDoc.rect(0, 0, pageWidth, 32, 'F');
+      pdfDoc.setFontSize(16);
+      pdfDoc.setTextColor(255, 255, 255);
+      pdfDoc.text(`Laporan Hasil Ujian`, 14, 14);
+      pdfDoc.setFontSize(10);
+      pdfDoc.setTextColor(200, 210, 230);
+      pdfDoc.text(`${exam.name} | Kode: ${exam.code}`, 14, 22);
+      pdfDoc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 28);
+      pdfDoc.text(`Total Peserta: ${sessionsToExport.length}`, pageWidth - 14, 14, { align: 'right' });
+
+      const rows = buildExportRows(sessionsToExport, questions);
+      const tableBody = rows.map(r => [r.no, r.name, r.nim, r.major, r.kelas, r.status, r.violations, r.pg, r.essay, r.livecode, r.reduction, r.total]);
+
+      autoTable(pdfDoc, {
+        startY: 36,
+        head: [['No', 'Nama', 'NIM', 'Program Studi', 'Kelas', 'Status', 'Pelang.', 'Nilai PG', 'Nilai Essay', 'Live Code', 'Pengurangan', 'Nilai Akhir']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, halign: 'center', cellPadding: 3 },
+        styles: { fontSize: 7, cellPadding: 2, textColor: [30, 30, 30], lineColor: [200, 210, 220], lineWidth: 0.3, overflow: 'linebreak' },
+        alternateRowStyles: { fillColor: [241, 245, 249] },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 8 }, 5: { halign: 'center', cellWidth: 22 },
+          6: { halign: 'center', cellWidth: 14 }, 7: { halign: 'center', cellWidth: 16 },
+          8: { halign: 'center', cellWidth: 16 }, 9: { halign: 'center', cellWidth: 16 },
+          10: { halign: 'center', cellWidth: 16 }, 11: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
+        },
+        willDrawCell: (data: any) => {
+          if (data.section === 'body' && data.column.index === 5) {
             const val = data.cell.raw as string;
-            if (val === 'Diskualifikasi') {
-              data.cell.styles.textColor = [185, 28, 28];
-              data.cell.styles.fontStyle = 'bold';
-            } else if (val === 'Selesai') {
-              data.cell.styles.textColor = [21, 128, 61];
-            } else if (val === 'Sedang Ujian') {
-              data.cell.styles.textColor = [29, 78, 216];
-            }
+            if (val === 'Diskualifikasi') { data.cell.styles.textColor = [185, 28, 28]; data.cell.styles.fontStyle = 'bold'; }
+            else if (val === 'Selesai') { data.cell.styles.textColor = [21, 128, 61]; }
+            else if (val === 'Sedang Ujian') { data.cell.styles.textColor = [29, 78, 216]; }
           }
-          if (data.column.index === 6) {
-            const num = parseInt(data.cell.raw as string);
-            if (num >= 5) {
-              data.cell.styles.textColor = [185, 28, 28];
-              data.cell.styles.fontStyle = 'bold';
-            } else if (num >= 3) {
-              data.cell.styles.textColor = [194, 120, 3];
-            }
-          }
-          if (data.column.index === 11) {
+          if (data.section === 'body' && data.column.index === 11) {
             const score = parseFloat(data.cell.raw as string);
-            if (score < 50) {
-              data.cell.styles.textColor = [185, 28, 28];
-            } else if (score >= 80) {
-              data.cell.styles.textColor = [21, 128, 61];
+            if (!isNaN(score)) {
+              if (score < 50) data.cell.styles.textColor = [185, 28, 28];
+              else if (score >= 80) data.cell.styles.textColor = [21, 128, 61];
             }
           }
-        }
-      },
-      didDrawPage: (data: any) => {
-        const pageCount = pdfDoc.getNumberOfPages();
-        pdfDoc.setFontSize(7);
-        pdfDoc.setTextColor(150, 150, 150);
-        pdfDoc.text(
-          `Halaman ${data.pageNumber} dari ${pageCount}`,
-          pageWidth / 2,
-          pdfDoc.internal.pageSize.getHeight() - 8,
-          { align: 'center' }
-        );
-        pdfDoc.text(
-          `${exam.name} - ${exam.code}`,
-          14,
-          pdfDoc.internal.pageSize.getHeight() - 8
-        );
-      },
-    });
+        },
+        didDrawPage: (data: any) => {
+          const pageCount = pdfDoc.getNumberOfPages();
+          pdfDoc.setFontSize(7);
+          pdfDoc.setTextColor(150, 150, 150);
+          pdfDoc.text(`Halaman ${data.pageNumber} dari ${pageCount}`, pageWidth / 2, pdfDoc.internal.pageSize.getHeight() - 8, { align: 'center' });
+          pdfDoc.text(`${exam.name} - ${exam.code}`, 14, pdfDoc.internal.pageSize.getHeight() - 8);
+        },
+      });
+      pdfDoc.save(`Hasil_Ujian_${exam.code}_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error('Export PDF error:', err);
+      alert('Gagal mengekspor PDF. Silakan coba lagi.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
-    const filterSuffix = (searchTerm || filterKelas || filterJurusan) ? '_filtered' : '';
-    pdfDoc.save(`Hasil_Ujian_${exam.code}_${new Date().toISOString().split('T')[0]}${filterSuffix}.pdf`);
+  const downloadResultsExcel = async () => {
+    setIsExporting(true);
+    try {
+      const allSessions = await fetchAllSessionsForExport();
+      const rows = buildExportRows(allSessions, questions);
+      const headers = ['No', 'Nama Lengkap', 'NIM', 'Program Studi', 'Kelas', 'Status', 'Pelanggaran', 'Nilai PG', 'Nilai Essay', 'Nilai Live Code', 'Pengurangan', 'Nilai Akhir'];
+      const csvRows = [
+        headers.join(','),
+        ...rows.map(r => [r.no, `"${r.name}"`, `"${r.nim}"`, `"${r.major}"`, `"${r.kelas}"`, r.status, r.violations, r.pg, r.essay, r.livecode, r.reduction, r.total].join(','))
+      ];
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Hasil_Ujian_${exam.code}_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export Excel error:', err);
+      alert('Gagal mengekspor Excel. Silakan coba lagi.');
+    } finally {
+      setIsExporting(false);
+    }
   };
   if (selectedSession) {
     return (
@@ -532,34 +480,36 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-3xl font-bold">Hasil Ujian: {exam.name}</h2>
         <div className="flex space-x-3">
-          <button 
-            onClick={() => loadSessions(true)}
-            disabled={isLoadingMore}
+          <button
+            onClick={() => { loadTotalCount(); loadPage(currentPage, pageCursors); }}
+            disabled={isPageLoading}
             className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-blue-400 flex items-center"
           >
-            {isLoadingMore ? (
-              <>
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                Refreshing...
-              </>
+            {isPageLoading ? (
+              <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>Refreshing...</>
             ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Refresh Data
-              </>
+              <><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Refresh Data</>
             )}
           </button>
-          <button 
+          <button
+            onClick={downloadResultsExcel}
+            disabled={isExporting || totalCount === 0}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isExporting ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Mengekspor...</> : <>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Export Excel (Semua)
+            </>}
+          </button>
+          <button
             onClick={downloadResultsPDF}
-            disabled={filteredSessions.length === 0}
+            disabled={isExporting || totalCount === 0}
             className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Download PDF
+            {isExporting ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Mengekspor...</> : <>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Download PDF (Semua)
+            </>}
           </button>
         </div>
       </div>
@@ -637,10 +587,8 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
         <div className="mt-4 flex justify-between items-center text-sm text-gray-400">
           <div>
             Menampilkan {filteredSessions.length} dari {sessions.length} peserta ujian
-            {hasMoreData && (
-              <span className="ml-2 text-yellow-400">
-                (Halaman {currentPage}, ada data lainnya)
-              </span>
+            {totalCount > sessions.length && (
+              <span className="ml-2 text-yellow-400">(Halaman {currentPage} dari {totalPages})</span>
             )}
             {(searchTerm || filterKelas || filterJurusan) && (
               <span className="ml-2 text-blue-400">
@@ -1105,7 +1053,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
             {filteredSessions.length === 0 ? (
               <tr>
                 <td colSpan={13} className="text-center p-8 text-gray-400">
-                  {sessions.length === 0 
+                  {isPageLoading ? 'Memuat data...' : sessions.length === 0
                     ? "Belum ada peserta ujian yang menyelesaikan ujian."
                     : "Tidak ada peserta ujian yang sesuai dengan filter."
                   }
@@ -1193,38 +1141,42 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           </tbody>
         </table>
         
-        {/* Pagination Controls */}
-        {hasMoreData && (
-          <div className="p-6 bg-gray-700 border-t border-gray-600">
-            <div className="flex justify-between items-center">
+        {/* Pagination Bar */}
+        {(() => {
+          const startItem = totalCount > 0 ? (currentPage - 1) * SESSIONS_PER_PAGE + 1 : 0;
+          const endItem = Math.min(currentPage * SESSIONS_PER_PAGE, totalCount);
+          return (
+            <div className="flex items-center justify-between px-4 py-3 bg-gray-700 border-t border-gray-600 flex-wrap gap-2">
               <div className="text-sm text-gray-400">
-                Menampilkan {sessions.length} peserta ujian (Halaman {currentPage})
-                <button
-                  onClick={() => loadSessions(true)}
-                  className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-3 rounded"
-                >
-                  🔄 Refresh Data
-                </button>
+                {totalCount > 0 ? `${startItem}–${endItem} dari ${totalCount} data` : 'Tidak ada data'}
+                {isPageLoading && <span className="ml-2 text-blue-400 animate-pulse">Memuat...</span>}
               </div>
-              <button
-                onClick={() => loadSessions(false)}
-                disabled={isLoadingMore}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-indigo-400 flex items-center"
-              >
-                {isLoadingMore ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Memuat...
-                  </>
-                ) : (
-                  <>
-                    📄 Muat Lebih Banyak ({SESSIONS_PER_PAGE} peserta ujian)
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-1 flex-wrap">
+                <button onClick={() => { setCurrentPage(1); loadPage(1, pageCursors); }} disabled={currentPage === 1 || isPageLoading}
+                  className="px-2 py-1 rounded text-sm bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed">«</button>
+                <button onClick={() => { const p = currentPage - 1; setCurrentPage(p); loadPage(p, pageCursors); }} disabled={currentPage === 1 || isPageLoading}
+                  className="px-3 py-1 rounded text-sm bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed">‹ Sebelumnya</button>
+                {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                  let page: number;
+                  if (totalPages <= 7) page = i + 1;
+                  else if (currentPage <= 4) page = i + 1;
+                  else if (currentPage >= totalPages - 3) page = totalPages - 6 + i;
+                  else page = currentPage - 3 + i;
+                  return (
+                    <button key={page} onClick={() => { setCurrentPage(page); loadPage(page, pageCursors); }} disabled={isPageLoading}
+                      className={`px-3 py-1 rounded text-sm font-medium disabled:cursor-not-allowed ${
+                        currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
+                      }`}>{page}</button>
+                  );
+                })}
+                <button onClick={() => { const p = currentPage + 1; setCurrentPage(p); loadPage(p, pageCursors); }} disabled={currentPage >= totalPages || isPageLoading}
+                  className="px-3 py-1 rounded text-sm bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed">Berikutnya ›</button>
+                <button onClick={() => { setCurrentPage(totalPages); loadPage(totalPages, pageCursors); }} disabled={currentPage >= totalPages || isPageLoading}
+                  className="px-2 py-1 rounded text-sm bg-gray-600 hover:bg-gray-500 disabled:opacity-40 disabled:cursor-not-allowed">»</button>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
