@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { collection, getDocs, onSnapshot, query, limit, startAfter, orderBy, DocumentSnapshot, updateDoc, doc, getCountFromServer } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, limit, startAfter, orderBy, DocumentSnapshot, updateDoc, doc, deleteDoc, getCountFromServer } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -75,6 +75,8 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [editingStatus, setEditingStatus] = useState<string>('finished');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editSuccess, setEditSuccess] = useState('');
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState<Session | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const totalPages = Math.ceil(totalCount / SESSIONS_PER_PAGE);
 
@@ -316,6 +318,22 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   };
 
   const handleSaveScoreReduction = handleSaveAllEdits;
+
+  const handleDeleteSession = async () => {
+    if (!confirmDeleteSession) return;
+    setIsDeleting(true);
+    try {
+      await deleteDoc(doc(db, `artifacts/${appId}/public/data/exams/${exam.id}/sessions`, confirmDeleteSession.id));
+      setConfirmDeleteSession(null);
+      await loadTotalCount();
+      await loadPage(currentPage, pageCursors);
+    } catch (err) {
+      console.error('Error deleting session:', err);
+      alert('Gagal menghapus data peserta ujian. Silakan coba lagi.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const buildExportRows = (allSessions: Session[], questionsData: Question[]) => {
     return allSessions.map((session, idx) => {
@@ -1029,7 +1047,58 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           </div>
         </div>
       )}
-      
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteSession && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Hapus Peserta Ujian</h3>
+                  <p className="text-gray-400 text-sm">Tindakan ini tidak dapat dibatalkan</p>
+                </div>
+              </div>
+              <div className="bg-gray-700 rounded-lg p-4 mb-5">
+                <p className="text-white font-semibold">{confirmDeleteSession.studentInfo.name || confirmDeleteSession.studentInfo.fullName}</p>
+                <p className="text-gray-400 text-sm">{confirmDeleteSession.studentInfo.nim}</p>
+                {confirmDeleteSession.studentInfo.className && (
+                  <p className="text-gray-400 text-sm">{confirmDeleteSession.studentInfo.className} &mdash; {confirmDeleteSession.studentInfo.major}</p>
+                )}
+              </div>
+              <p className="text-gray-300 text-sm mb-5">
+                Semua data ujian peserta ini termasuk jawaban, nilai, dan pelanggaran akan dihapus secara permanen.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setConfirmDeleteSession(null)}
+                  disabled={isDeleting}
+                  className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-5 rounded-lg disabled:opacity-60"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleDeleteSession}
+                  disabled={isDeleting}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-5 rounded-lg disabled:opacity-60 flex items-center gap-2"
+                >
+                  {isDeleting ? (
+                    <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Menghapus...</>
+                  ) : (
+                    'Hapus'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 bg-gray-800 rounded-lg shadow-xl overflow-x-auto">
         <table className="w-full text-left">
           <thead className="bg-gray-700">
@@ -1047,12 +1116,13 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
               <th className="p-4">Pengurangan</th>
               <th className="p-4">History</th>
               <th className="p-4">Aksi</th>
+              <th className="p-4">Hapus</th>
             </tr>
           </thead>
           <tbody>
             {filteredSessions.length === 0 ? (
               <tr>
-                <td colSpan={13} className="text-center p-8 text-gray-400">
+                <td colSpan={14} className="text-center p-8 text-gray-400">
                   {isPageLoading ? 'Memuat data...' : sessions.length === 0
                     ? "Belum ada peserta ujian yang menyelesaikan ujian."
                     : "Tidak ada peserta ujian yang sesuai dengan filter."
@@ -1134,6 +1204,14 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                         Edit Nilai
                       </button>
                     </div>
+                  </td>
+                  <td className="p-4">
+                    <button
+                      onClick={() => setConfirmDeleteSession(session)}
+                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-2 rounded"
+                    >
+                      Hapus
+                    </button>
                   </td>
                 </tr>
               ))
