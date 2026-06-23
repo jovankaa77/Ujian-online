@@ -152,14 +152,19 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
   const formatViolationType = (type: string): string => {
     const typeMap: Record<string, string> = {
       'tab_switch': 'Focus Lost',
-      'focus_lost': 'Keluar dari Window',
+      'focus_lost': 'Focus Lost',
       'fullscreen_exit': 'Focus Lost',
       'keyboard_shortcut': 'Focus Lost',
       'copy_paste': 'Copy/Paste Terdeteksi',
       'devtools': 'Developer Tools Dibuka',
       'extension_detected': 'Ekstensi Terlarang Terdeteksi',
       'screenshot_attempt': 'Percobaan Screenshot',
-      'right_click': 'Focus Lost'
+      'right_click': 'Focus Lost',
+      'Focus Lost': 'Focus Lost',
+      'Tab/Window Switch': 'Focus Lost',
+      'Exited Fullscreen': 'Focus Lost',
+      'Prohibited Shortcut': 'Focus Lost',
+      'Right Click Attempt': 'Focus Lost',
     };
     return typeMap[type] || type;
   };

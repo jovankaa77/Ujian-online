@@ -1013,14 +1013,14 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Enhanced security monitoring
     const handleVisibilityChange = () => {
       if (document.hidden && !isFinished) {
-        handleViolation("Tab/Window Switch");
+        handleViolation("Focus Lost");
       }
     };
     
     // Monitor fullscreen changes
     const handleFullscreenChange = () => {
       if (!isInFullscreen() && !isFinished) {
-        handleViolation("Exited Fullscreen");
+        handleViolation("Focus Lost");
         // Auto re-enter fullscreen after violation
         setTimeout(() => {
           if (!isFinished) {
@@ -1067,7 +1067,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Prevent right-click and common shortcuts
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      handleViolation("Right Click Attempt");
+      handleViolation("Focus Lost");
     };
     
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1100,7 +1100,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
         if (e.key === 'PrintScreen') {
           handleViolation("Screenshot Attempt");
         } else {
-          handleViolation("Prohibited Shortcut");
+          handleViolation("Focus Lost");
         }
       }
     };
