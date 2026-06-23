@@ -151,15 +151,15 @@ const TeacherProctoringDashboard: React.FC<TeacherProctoringDashboardProps> = ({
 
   const formatViolationType = (type: string): string => {
     const typeMap: Record<string, string> = {
-      'tab_switch': 'Pindah Tab',
+      'tab_switch': 'Focus Lost',
       'focus_lost': 'Keluar dari Window',
-      'fullscreen_exit': 'Keluar Fullscreen',
-      'keyboard_shortcut': 'Shortcut Keyboard Terlarang',
+      'fullscreen_exit': 'Focus Lost',
+      'keyboard_shortcut': 'Focus Lost',
       'copy_paste': 'Copy/Paste Terdeteksi',
       'devtools': 'Developer Tools Dibuka',
       'extension_detected': 'Ekstensi Terlarang Terdeteksi',
       'screenshot_attempt': 'Percobaan Screenshot',
-      'right_click': 'Klik Kanan Terdeteksi'
+      'right_click': 'Focus Lost'
     };
     return typeMap[type] || type;
   };
