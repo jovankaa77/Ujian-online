@@ -56,7 +56,10 @@ const videoToCanvas = (video: HTMLVideoElement): HTMLCanvasElement | null => {
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
+  // Enhance contrast/brightness to improve detection on low-quality cameras
+  ctx.filter = 'contrast(1.2) brightness(1.05)';
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.filter = 'none';
   return canvas;
 };
 
@@ -177,3 +180,116 @@ export interface FaceVerificationLog {
 
 export const descriptorToArray = (desc: Float32Array): number[] => Array.from(desc);
 export const arrayToDescriptor = (arr: number[]): Float32Array => new Float32Array(arr);
+
+export interface FaceQualityResult {
+  faceCount: number;
+  status: 'ok' | 'no_face' | 'multiple_faces' | 'too_small' | 'sideways' | 'partially_covered';
+  message: string;
+  color: 'green' | 'yellow' | 'red';
+  box?: { x: number; y: number; width: number; height: number };
+}
+
+const avgPoint = (pts: faceapi.Point[]) => ({
+  x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
+  y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
+});
+
+export const detectFaceQualityFromVideo = async (
+  video: HTMLVideoElement
+): Promise<FaceQualityResult> => {
+  if (!modelsLoaded) {
+    return { faceCount: 0, status: 'no_face', message: 'Model belum dimuat.', color: 'red' };
+  }
+  if (video.readyState < 2 || !video.videoWidth) {
+    return { faceCount: 0, status: 'no_face', message: 'Kamera belum siap.', color: 'red' };
+  }
+
+  const canvas = videoToCanvas(video);
+  if (!canvas) {
+    return { faceCount: 0, status: 'no_face', message: 'Gagal membaca kamera.', color: 'red' };
+  }
+
+  try {
+    const detections = await faceapi
+      .detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+      .withFaceLandmarks();
+
+    if (detections.length === 0) {
+      return {
+        faceCount: 0, status: 'no_face', color: 'red',
+        message: 'Wajah tidak terdeteksi. Pastikan wajah Anda terlihat penuh dan pencahayaan cukup.',
+      };
+    }
+
+    if (detections.length > 1) {
+      const b = detections[0].detection.box;
+      return {
+        faceCount: detections.length, status: 'multiple_faces', color: 'red',
+        message: `Terdeteksi ${detections.length} wajah. Hanya 1 wajah yang diizinkan.`,
+        box: { x: b.x, y: b.y, width: b.width, height: b.height },
+      };
+    }
+
+    const det = detections[0];
+    const box = det.detection.box;
+    const score = det.detection.score;
+    const pts = det.landmarks.positions;
+
+    const faceWidthRatio = box.width / canvas.width;
+    if (faceWidthRatio < 0.13) {
+      return {
+        faceCount: 1, status: 'too_small', color: 'yellow',
+        message: 'Wajah terlalu jauh. Dekatkan wajah Anda ke kamera.',
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+      };
+    }
+
+    // Sideways: compare nose tip horizontal position vs eye midpoint
+    const leftEyeCenter = avgPoint(pts.slice(36, 42));
+    const rightEyeCenter = avgPoint(pts.slice(42, 48));
+    const eyeMidX = (leftEyeCenter.x + rightEyeCenter.x) / 2;
+    const eyeDist = Math.abs(rightEyeCenter.x - leftEyeCenter.x);
+    const noseTip = pts[30];
+    const noseDeviation = eyeDist > 0 ? Math.abs(noseTip.x - eyeMidX) / eyeDist : 0;
+
+    if (noseDeviation > 0.38) {
+      return {
+        faceCount: 1, status: 'sideways', color: 'yellow',
+        message: 'Wajah menghadap samping. Hadapkan wajah langsung ke kamera.',
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+      };
+    }
+
+    // Partial coverage: low detection score = mask/hand/object blocking face
+    if (score < 0.48) {
+      return {
+        faceCount: 1, status: 'partially_covered', color: 'yellow',
+        message: 'Wajah terdeteksi kurang jelas. Pastikan wajah tidak tertutup masker, tangan, atau benda lain.',
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+      };
+    }
+
+    // Check lower face coverage using landmark geometry
+    const noseTipY = noseTip.y;
+    const chinY = pts[8].y;
+    const eyeY = (leftEyeCenter.y + rightEyeCenter.y) / 2;
+    const totalFaceH = chinY - eyeY;
+    const lowerFaceH = chinY - noseTipY;
+    if (totalFaceH > 0 && lowerFaceH / totalFaceH < 0.22) {
+      return {
+        faceCount: 1, status: 'partially_covered', color: 'yellow',
+        message: 'Bagian bawah wajah tertutup. Lepas masker atau benda yang menutupi wajah.',
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+      };
+    }
+
+    return {
+      faceCount: 1, status: 'ok', color: 'green',
+      message: 'Wajah terdeteksi dengan baik.',
+      box: { x: box.x, y: box.y, width: box.width, height: box.height },
+    };
+  } catch (error) {
+    console.error('[detectFaceQuality] Error:', error);
+    return { faceCount: 0, status: 'no_face', message: 'Gagal mendeteksi wajah.', color: 'red' };
+  }
+};

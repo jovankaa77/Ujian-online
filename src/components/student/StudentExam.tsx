@@ -122,6 +122,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const isCameraReadyRef = useRef(false);
   const lastViolationTypeRef = useRef<string>('normal');
   const faceCheckRunningRef = useRef(false);
+  const consecutiveMismatchRef = useRef(0);
   const [faceWarningMessage, setFaceWarningMessage] = useState<string | null>(null);
 
   const saveFaceViolationLog = async (
@@ -200,12 +201,15 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       if (baselineDescriptorRef.current && detections.length === 1) {
         const currentDescriptor = detections[0].descriptor;
         const distance = euclideanDistance(baselineDescriptorRef.current, currentDescriptor);
-        console.log(`[FaceCheck] Face distance: ${distance.toFixed(4)} (threshold: 0.6)`);
+        console.log(`[FaceCheck] Face distance: ${distance.toFixed(4)} (threshold: 0.65)`);
 
-        if (distance > 0.6) {
+        if (distance > 0.65) {
+          consecutiveMismatchRef.current += 1;
           setFaceWarningMessage('Wajah yang terdeteksi berbeda dari identitas saat pemeriksaan perangkat. Pelanggaran ini telah dicatat.');
-          if (lastViolationTypeRef.current !== 'unrecognized') {
+          // Only register violation after 2 consecutive mismatches to reduce camera-quality false positives
+          if (consecutiveMismatchRef.current >= 2 && lastViolationTypeRef.current !== 'unrecognized') {
             lastViolationTypeRef.current = 'unrecognized';
+            consecutiveMismatchRef.current = 0;
             console.log(`[FaceCheck] VIOLATION: Face mismatch (distance: ${distance.toFixed(3)})`);
             const evidencePhoto = captureFrameFromVideo(video);
             if (evidencePhoto) {
@@ -215,6 +219,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             }
           }
         } else {
+          consecutiveMismatchRef.current = 0;
           lastViolationTypeRef.current = 'normal';
           setFaceWarningMessage(null);
         }
@@ -1064,23 +1069,20 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
       handleViolation("Multiple Tabs Detected");
     }
     
-    // Prevent right-click and common shortcuts
+    // Prevent right-click context menu (no violation — just block the menu)
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      handleViolation("Focus Lost");
     };
-    
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Allow Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Space without violation
-      if (
-        e.ctrlKey && (e.key === 'a' || e.key === 'A' ||
-                      e.key === 'c' || e.key === 'C' ||
-                      e.key === 'x' || e.key === 'X' ||
-                      e.key === 'v' || e.key === 'V')
-      ) {
-        return;
-      }
-      if (e.key === ' ') {
+      // Allow Ctrl+A and Space
+      if (e.key === ' ') return;
+      if (e.ctrlKey && (e.key === 'a' || e.key === 'A')) return;
+
+      // Ctrl+C (copy) and Ctrl+V (paste) = violation
+      if (e.ctrlKey && (e.key === 'c' || e.key === 'C' || e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        handleViolation("Focus Lost");
         return;
       }
 

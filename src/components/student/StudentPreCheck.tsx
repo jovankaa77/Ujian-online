@@ -8,6 +8,8 @@ import {
   captureFrameFromVideo,
   descriptorToArray,
   areModelsLoaded,
+  detectFaceQualityFromVideo,
+  FaceQualityResult,
 } from '../../utils/faceVerification';
 
 interface StudentPreCheckProps {
@@ -44,6 +46,9 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
   const [faceError, setFaceError] = useState<string | null>(null);
   const [baselineDescriptor, setBaselineDescriptor] = useState<Float32Array | null>(null);
   const [baselinePhotoUrl, setBaselinePhotoUrl] = useState<string | null>(null);
+  const [faceQuality, setFaceQuality] = useState<FaceQualityResult | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const faceQualityIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
@@ -262,6 +267,70 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
       }
     };
   }, []);
+
+  const drawFaceBox = (result: FaceQualityResult, video: HTMLVideoElement, canvas: HTMLCanvasElement) => {
+    canvas.width = canvas.offsetWidth || video.clientWidth || 320;
+    canvas.height = canvas.offsetHeight || video.clientHeight || 240;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !result.box) { ctx?.clearRect(0, 0, canvas.width, canvas.height); return; }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const scaleX = canvas.width / (video.videoWidth || 1);
+    const scaleY = canvas.height / (video.videoHeight || 1);
+    const x = result.box.x * scaleX;
+    const y = result.box.y * scaleY;
+    const w = result.box.width * scaleX;
+    const h = result.box.height * scaleY;
+
+    const colorMap = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' };
+    const color = colorMap[result.color];
+    const cornerLen = Math.min(w, h) * 0.22;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    // Top-left corner
+    ctx.moveTo(x, y + cornerLen); ctx.lineTo(x, y); ctx.lineTo(x + cornerLen, y);
+    // Top-right corner
+    ctx.moveTo(x + w - cornerLen, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + cornerLen);
+    // Bottom-left corner
+    ctx.moveTo(x, y + h - cornerLen); ctx.lineTo(x, y + h); ctx.lineTo(x + cornerLen, y + h);
+    // Bottom-right corner
+    ctx.moveTo(x + w - cornerLen, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - cornerLen);
+    ctx.stroke();
+  };
+
+  useEffect(() => {
+    if (faceModelStatus !== 'loaded' || checks.camera !== true || faceVerified) {
+      if (overlayCanvasRef.current) {
+        const ctx = overlayCanvasRef.current.getContext('2d');
+        ctx?.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+      }
+      if (faceQualityIntervalRef.current) {
+        clearInterval(faceQualityIntervalRef.current);
+        faceQualityIntervalRef.current = null;
+      }
+      return;
+    }
+
+    const run = async () => {
+      if (!videoRef.current || !overlayCanvasRef.current) return;
+      const result = await detectFaceQualityFromVideo(videoRef.current);
+      setFaceQuality(result);
+      if (videoRef.current && overlayCanvasRef.current) {
+        drawFaceBox(result, videoRef.current, overlayCanvasRef.current);
+      }
+    };
+
+    run();
+    faceQualityIntervalRef.current = setInterval(run, 900);
+    return () => {
+      if (faceQualityIntervalRef.current) clearInterval(faceQualityIntervalRef.current);
+    };
+  }, [faceModelStatus, checks.camera, faceVerified]);
 
   const handleCaptureFace = async () => {
     if (!videoRef.current || faceModelStatus !== 'loaded') return;
@@ -696,7 +765,7 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
           </div>
         )}
 
-        <div className="my-4 w-full aspect-video bg-gray-900 rounded-md overflow-hidden">
+        <div className="my-4 w-full aspect-video bg-gray-900 rounded-md overflow-hidden relative">
           {checks.camera === false && (
             <div className="w-full h-full flex items-center justify-center bg-red-900">
               <div className="text-center p-4">
@@ -717,7 +786,27 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
             muted
             className={`w-full h-full object-cover ${checks.camera === false ? 'hidden' : ''}`}
           />
+          {/* Bounding box overlay canvas */}
+          <canvas
+            ref={overlayCanvasRef}
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ display: faceModelStatus === 'loaded' && !faceVerified && checks.camera ? 'block' : 'none' }}
+          />
         </div>
+
+        {/* Face quality feedback message */}
+        {faceModelStatus === 'loaded' && !faceVerified && checks.camera && faceQuality && (
+          <div className={`mb-3 px-3 py-2 rounded-md text-sm text-center font-medium ${
+            faceQuality.color === 'green'
+              ? 'bg-green-900 border border-green-600 text-green-300'
+              : faceQuality.color === 'yellow'
+              ? 'bg-yellow-900 border border-yellow-600 text-yellow-300'
+              : 'bg-red-900 border border-red-600 text-red-300'
+          }`}>
+            {faceQuality.color === 'green' ? '✓ ' : faceQuality.color === 'yellow' ? '⚠ ' : '✗ '}
+            {faceQuality.message}
+          </div>
+        )}
 
         <canvas ref={faceCanvasRef} style={{ display: 'none' }} />
 
@@ -751,14 +840,16 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
 
             <button
               onClick={handleCaptureFace}
-              disabled={faceCapturing || faceModelStatus !== 'loaded'}
+              disabled={faceCapturing || faceModelStatus !== 'loaded' || (faceQuality !== null && faceQuality.status !== 'ok')}
               className={`w-full font-bold py-3 px-4 rounded-lg transition-all ${
-                faceCapturing || faceModelStatus !== 'loaded'
+                faceCapturing || faceModelStatus !== 'loaded' || (faceQuality !== null && faceQuality.status !== 'ok')
                   ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
                   : 'bg-teal-600 hover:bg-teal-700 text-white'
               }`}
             >
-              {faceCapturing ? 'Memproses wajah...' : 'Ambil Foto Verifikasi Wajah'}
+              {faceCapturing ? 'Memproses wajah...' :
+               faceQuality && faceQuality.status !== 'ok' ? 'Perbaiki posisi wajah dahulu' :
+               'Ambil Foto Verifikasi Wajah'}
             </button>
           </div>
         )}
