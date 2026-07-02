@@ -181,6 +181,35 @@ export interface FaceVerificationLog {
 export const descriptorToArray = (desc: Float32Array): number[] => Array.from(desc);
 export const arrayToDescriptor = (arr: number[]): Float32Array => new Float32Array(arr);
 
+export interface FaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  score: number;
+}
+
+// Lightweight detection — bounding boxes only, no landmarks/descriptors.
+// Use for real-time visual overlays; do NOT use for identity verification.
+export const detectFaceBoxesForDisplay = async (
+  video: HTMLVideoElement
+): Promise<FaceBox[]> => {
+  if (!modelsLoaded || video.readyState < 2 || !video.videoWidth) return [];
+  const canvas = videoToCanvas(video);
+  if (!canvas) return [];
+  try {
+    const detections = await faceapi
+      .detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }));
+    return detections.map(d => ({
+      x: d.box.x, y: d.box.y,
+      width: d.box.width, height: d.box.height,
+      score: d.score,
+    }));
+  } catch {
+    return [];
+  }
+};
+
 export interface FaceQualityResult {
   faceCount: number;
   status: 'ok' | 'no_face' | 'multiple_faces' | 'too_small' | 'sideways' | 'partially_covered';
@@ -261,7 +290,7 @@ export const detectFaceQualityFromVideo = async (
     }
 
     // Partial coverage: low detection score = mask/hand/object blocking face
-    if (score < 0.48) {
+    if (score < 0.44) {
       return {
         faceCount: 1, status: 'partially_covered', color: 'yellow',
         message: 'Wajah terdeteksi kurang jelas. Pastikan wajah tidak tertutup masker, tangan, atau benda lain.',
@@ -269,9 +298,27 @@ export const detectFaceQualityFromVideo = async (
       };
     }
 
-    // Check lower face coverage using landmark geometry
+    // Check mouth coverage specifically (hand covering mouth area)
+    // landmark 33 = nose base, 51 = upper lip center, 57 = lower lip center, 8 = chin
     const noseTipY = noseTip.y;
     const chinY = pts[8].y;
+    const noseBaseY = pts[33].y;
+    const mouthMidY = (pts[51].y + pts[57].y) / 2;
+    const noseToChinH = chinY - noseTipY;
+
+    // When a hand covers the mouth, mouth landmarks compress toward nose base
+    if (noseToChinH > 0) {
+      const noseToMouthRatio = (mouthMidY - noseBaseY) / noseToChinH;
+      if (noseToMouthRatio < 0.14) {
+        return {
+          faceCount: 1, status: 'partially_covered', color: 'yellow',
+          message: 'Area mulut tertutup tangan atau benda. Pastikan seluruh wajah terlihat penuh.',
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        };
+      }
+    }
+
+    // Check lower face coverage using landmark geometry
     const eyeY = (leftEyeCenter.y + rightEyeCenter.y) / 2;
     const totalFaceH = chinY - eyeY;
     const lowerFaceH = chinY - noseTipY;

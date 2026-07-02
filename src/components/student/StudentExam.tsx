@@ -7,6 +7,8 @@ import LiveCodeEditor from './LiveCodeEditor';
 import {
   loadFaceModels,
   detectAllFaces,
+  detectFaceBoxesForDisplay,
+  FaceBox,
   euclideanDistance,
   arrayToDescriptor,
   captureFrameFromVideo,
@@ -123,7 +125,84 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const lastViolationTypeRef = useRef<string>('normal');
   const faceCheckRunningRef = useRef(false);
   const consecutiveMismatchRef = useRef(0);
+  const examOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const faceBoxLoopRef = useRef<NodeJS.Timeout | null>(null);
   const [faceWarningMessage, setFaceWarningMessage] = useState<string | null>(null);
+
+  const drawExamFaceBoxes = (
+    boxes: FaceBox[],
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement
+  ) => {
+    canvas.width = canvas.offsetWidth || 160;
+    canvas.height = canvas.offsetHeight || 120;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (boxes.length === 0) return;
+
+    const status = lastViolationTypeRef.current;
+    const color =
+      status === 'double' ? '#ef4444' :
+      status === 'unrecognized' ? '#f97316' :
+      status === 'no_face' ? '#eab308' :
+      '#22c55e';
+
+    const scaleX = canvas.width / (video.videoWidth || 1);
+    const scaleY = canvas.height / (video.videoHeight || 1);
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 5;
+
+    boxes.forEach((box, idx) => {
+      const x = box.x * scaleX;
+      const y = box.y * scaleY;
+      const w = box.width * scaleX;
+      const h = box.height * scaleY;
+      const len = Math.min(w, h) * 0.28;
+
+      // Use red for any extra face beyond first
+      if (idx > 0) { ctx.strokeStyle = '#ef4444'; ctx.shadowColor = '#ef4444'; }
+
+      ctx.beginPath();
+      ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y);
+      ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len);
+      ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h);
+      ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len);
+      ctx.stroke();
+
+      // Tiny status label
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = color;
+      ctx.font = 'bold 9px Arial';
+      const label = boxes.length > 1 ? (idx === 0 ? 'GANDA' : `+${idx}`) :
+                    status === 'unrecognized' ? '!' :
+                    status === 'ok' || status === 'normal' ? '✓' : '?';
+      ctx.fillText(label, x + 2, y + h - 3);
+      ctx.shadowBlur = 5;
+    });
+  };
+
+  // Visual face-box loop: lightweight box-only detection every 1.5s for overlay
+  useEffect(() => {
+    if (!isCameraReady || !faceModelLoaded || isFinished) return;
+
+    const run = async () => {
+      if (!videoRef.current || !examOverlayCanvasRef.current || isFinishedRef.current) return;
+      const boxes = await detectFaceBoxesForDisplay(videoRef.current);
+      if (videoRef.current && examOverlayCanvasRef.current) {
+        drawExamFaceBoxes(boxes, videoRef.current, examOverlayCanvasRef.current);
+      }
+    };
+
+    run();
+    faceBoxLoopRef.current = setInterval(run, 1500);
+    return () => {
+      if (faceBoxLoopRef.current) clearInterval(faceBoxLoopRef.current);
+    };
+  }, [isCameraReady, faceModelLoaded, isFinished]);
 
   const saveFaceViolationLog = async (
     violationType: 'Wajah Ganda' | 'Wajah Tidak Dikenali',
@@ -1521,12 +1600,17 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
           📷 Live Camera
         </div>
         <div className="relative">
-          <video 
+          <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
             className="w-40 h-30 object-cover"
+          />
+          {/* Face bounding box overlay */}
+          <canvas
+            ref={examOverlayCanvasRef}
+            className="absolute inset-0 w-full h-full pointer-events-none"
           />
           {!isCameraReady && (
             <div className="absolute inset-0 bg-gray-900 flex items-center justify-center">
