@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, getDocs, query, where, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 interface FaceVerificationDashboardProps {
@@ -60,7 +60,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'violations' | 'baselines'>('violations');
   const [selectedPhoto, setSelectedPhoto] = useState<SelectedPhoto | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'violation'; logId: string } | { type: 'baseline'; sessionId: string; studentName: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'baseline'; sessionId: string; studentName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -130,19 +130,6 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
       setBaselinePhotos(photos);
     } catch (error) {
       console.error('Error loading baseline photos:', error);
-    }
-  };
-
-  const handleDeleteViolation = async (logId: string) => {
-    setIsDeleting(true);
-    try {
-      await deleteDoc(doc(db, `artifacts/${appId}/public/data/face_verification_logs`, logId));
-      setLogs(prev => prev.filter(l => l.id !== logId));
-    } catch (error) {
-      console.error('Error deleting violation log:', error);
-    } finally {
-      setIsDeleting(false);
-      setConfirmDelete(null);
     }
   };
 
@@ -326,7 +313,6 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
                   student={student}
                   formatTimestamp={formatTimestamp}
                   onPhotoClick={(photo) => setSelectedPhoto(photo)}
-                  onDeleteViolation={(logId) => setConfirmDelete({ type: 'violation', logId })}
                 />
               ))}
             </div>
@@ -440,16 +426,12 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-white">Konfirmasi Hapus</h3>
                 <p className="text-sm text-gray-400">
-                  {confirmDelete.type === 'violation'
-                    ? 'Hapus log pelanggaran ini?'
-                    : `Hapus foto verifikasi ${confirmDelete.studentName}?`}
+                  {`Hapus foto verifikasi ${confirmDelete.studentName}?`}
                 </p>
               </div>
             </div>
             <p className="text-sm text-gray-400 mb-5 bg-gray-700/50 rounded-lg p-3">
-              {confirmDelete.type === 'violation'
-                ? 'Data pelanggaran ini akan dihapus permanen dan tidak dapat dikembalikan.'
-                : 'Foto verifikasi wajah peserta ujian ini akan dihapus. Peserta ujian perlu melakukan verifikasi ulang saat ujian berikutnya.'}
+              Foto verifikasi wajah peserta ujian ini akan dihapus. Peserta ujian perlu melakukan verifikasi ulang saat ujian berikutnya.
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -460,13 +442,7 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
                 Batal
               </button>
               <button
-                onClick={() => {
-                  if (confirmDelete.type === 'violation') {
-                    handleDeleteViolation(confirmDelete.logId);
-                  } else {
-                    handleDeleteBaseline(confirmDelete.sessionId);
-                  }
-                }}
+                onClick={() => handleDeleteBaseline(confirmDelete.sessionId)}
                 disabled={isDeleting}
                 className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-60 flex items-center gap-2"
               >
@@ -487,8 +463,7 @@ const StudentViolationCard: React.FC<{
   student: GroupedStudent;
   formatTimestamp: (ts: any) => string;
   onPhotoClick: (photo: SelectedPhoto) => void;
-  onDeleteViolation: (logId: string) => void;
-}> = ({ student, formatTimestamp, onPhotoClick, onDeleteViolation }) => {
+}> = ({ student, formatTimestamp, onPhotoClick }) => {
   const doubleCount = student.violations.filter((v) => v.violationType === 'Wajah Ganda').length;
   const unrecognizedCount = student.violations.filter((v) => v.violationType === 'Wajah Tidak Dikenali').length;
 
@@ -599,18 +574,6 @@ const StudentViolationCard: React.FC<{
                       />
                     </svg>
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteViolation(v.id);
-                    }}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Hapus pelanggaran ini"
-                  >
-                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
                 </div>
                 <div className="mt-1.5">
                   <span
