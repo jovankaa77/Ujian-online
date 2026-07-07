@@ -26,6 +26,7 @@ interface Question {
 
 interface Session {
   id: string;
+  studentId?: string;
   studentInfo: {
     name: string;
     nim: string;
@@ -74,6 +75,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
   const [editSuccess, setEditSuccess] = useState('');
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<Session | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [usernameMap, setUsernameMap] = useState<Map<string, string>>(new Map());
 
   const totalPages = Math.ceil(totalCount / SESSIONS_PER_PAGE);
 
@@ -145,6 +147,20 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
     });
     loadTotalCount();
     loadPage(1, [null]);
+
+    // Load username mapping from applications
+    const applicationsRef = collection(db, `artifacts/${appId}/public/data/exams/${exam.id}/applications`);
+    getDocs(query(applicationsRef)).then(snap => {
+      const map = new Map<string, string>();
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.studentId && data.studentData?.username) {
+          map.set(data.studentId, data.studentData.username);
+        }
+      });
+      setUsernameMap(map);
+    });
+
     return () => { unsubscribeQuestions(); };
   }, [exam?.id]);
   useEffect(() => {
@@ -887,7 +903,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                 <tr key={session.id} className="border-b border-gray-700 hover:bg-gray-700/50">
                   <td className="p-4 text-gray-400 text-center">{(currentPage - 1) * SESSIONS_PER_PAGE + index + 1}</td>
                   <td className="p-4 font-semibold">{session.studentInfo.name || session.studentInfo.fullName || 'N/A'}</td>
-                  <td className="p-4 text-gray-300">{session.studentInfo.username || '-'}</td>
+                  <td className="p-4 text-gray-300">{(session.studentId ? usernameMap.get(session.studentId) : undefined) || session.studentInfo.username || '-'}</td>
                   <td className="p-4 text-gray-300">{session.studentInfo.nim}</td>
                   <td className="p-4 text-gray-300">{session.studentInfo.major}</td>
                   <td className="p-4 text-gray-300">{session.studentInfo.className}</td>
