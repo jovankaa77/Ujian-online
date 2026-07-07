@@ -18,6 +18,7 @@ export interface ExtensionDetectionResult {
 // Daftar ekstensi yang dilarang atau berisiko tinggi
 const RISKY_EXTENSIONS = [
   // AI Assistants
+  { name: 'AI Sider', patterns: ['sider', 'ai sider', 'ai-sider'], risk: 'high' as const, description: 'AI Sidebar (Sider) yang dapat membantu menjawab soal secara langsung' },
   { name: 'Monica AI', patterns: ['monica', 'ai-assistant'], risk: 'high' as const, description: 'AI Assistant yang dapat membantu menjawab soal' },
   { name: 'ChatGPT Extension', patterns: ['chatgpt', 'openai'], risk: 'high' as const, description: 'AI Assistant ChatGPT' },
   { name: 'Grammarly', patterns: ['grammarly'], risk: 'medium' as const, description: 'Grammar checker yang dapat membantu essay' },
@@ -126,6 +127,17 @@ export const detectExtensions = async (): Promise<ExtensionDetectionResult> => {
 
 // Deteksi ekstensi melalui DOM injection
 const detectExtensionsByDOMInjection = async (detectedExtensions: ExtensionInfo[]): Promise<void> => {
+  // Deteksi AI Sider
+  if (document.querySelector('#sider-root') ||
+      document.querySelector('.sider-panel') ||
+      document.querySelector('[data-sider]') ||
+      document.querySelector('sider-extension') ||
+      document.querySelector('[class*="sider-"]') ||
+      (window as any).__SIDER__ ||
+      (window as any).siderAI) {
+    addDetectedExtension(detectedExtensions, 'AI Sider', 'sider-detected', 'high', 'AI Sider terdeteksi via DOM');
+  }
+
   // Deteksi Grammarly
   if (document.querySelector('grammarly-extension') || 
       document.querySelector('[data-grammarly-extension]') ||
@@ -158,6 +170,9 @@ const detectExtensionsByDOMInjection = async (detectedExtensions: ExtensionInfo[
 // Deteksi ekstensi melalui resource loading
 const detectExtensionsByResourceLoading = async (detectedExtensions: ExtensionInfo[]): Promise<void> => {
   const testUrls = [
+    // AI Sider - chrome extension IDs (multiple versions exist)
+    { url: 'chrome-extension://difoiogjjojoaoomphldepapgpbgkhkb/icon.png', name: 'AI Sider', risk: 'high' as const },
+    { url: 'chrome-extension://difoiogjjojoaoomphldepapgpbgkhkb/logo.png', name: 'AI Sider', risk: 'high' as const },
     { url: 'chrome-extension://cfhdojbkjhnklbpkdaibdccddilifddb/icon.png', name: 'Adblock Plus', risk: 'low' as const },
     { url: 'chrome-extension://gighmmpiobklfepjocnamgkkbiglidom/icon.png', name: 'AdBlock', risk: 'low' as const },
     { url: 'chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen/icon.png', name: 'Grammarly', risk: 'medium' as const },
@@ -179,6 +194,7 @@ const detectExtensionsByResourceLoading = async (detectedExtensions: ExtensionIn
 // Deteksi ekstensi melalui global objects
 const detectExtensionsByGlobalObjects = (detectedExtensions: ExtensionInfo[]): void => {
   const globalChecks = [
+    { check: () => (window as any).__SIDER__ || (window as any).siderAI || (window as any).SiderExtension, name: 'AI Sider', risk: 'high' as const },
     { check: () => (window as any).grammarly, name: 'Grammarly', risk: 'medium' as const },
     { check: () => (window as any).monica, name: 'Monica AI', risk: 'high' as const },
     { check: () => (window as any).chatgpt, name: 'ChatGPT Extension', risk: 'high' as const },

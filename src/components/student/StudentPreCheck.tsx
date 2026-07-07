@@ -684,6 +684,28 @@ const StudentPreCheck: React.FC<StudentPreCheckProps> = ({ navigateTo, navigateB
         {extensionResult && extensionResult.detectedExtensions.length > 0 && (
           <div className="mb-6 bg-red-900 border border-red-500 p-4 rounded-lg">
             <h4 className="text-red-300 font-bold mb-3">Ekstensi Terdeteksi ({extensionResult.detectedExtensions.length})</h4>
+
+            {/* Peringatan khusus AI Sider */}
+            {extensionResult.detectedExtensions.some(e => e.name === 'AI Sider') && (
+              <div className="mb-3 bg-red-700 border border-red-400 rounded-lg p-3 flex items-start gap-3">
+                <span className="text-2xl leading-none">🚫</span>
+                <div>
+                  <p className="text-white font-bold text-sm">AI Sider Terdeteksi!</p>
+                  <p className="text-red-200 text-xs mt-1">
+                    Ekstensi <strong>AI Sider</strong> aktif di browser Anda. Ekstensi ini adalah AI sidebar yang dapat memberikan jawaban secara langsung dan <strong>dilarang keras</strong> selama ujian.
+                    Ujian tidak dapat dimulai sebelum ekstensi ini dinonaktifkan.
+                  </p>
+                  <div className="mt-2 text-xs text-red-300 bg-red-900 rounded p-2">
+                    <p className="font-semibold mb-1">Cara menonaktifkan AI Sider:</p>
+                    <p>1. Klik ikon ekstensi ( <span className="font-mono bg-red-800 px-1 rounded">🧩</span> ) di pojok kanan atas browser</p>
+                    <p>2. Cari <strong>Sider</strong> lalu klik tombol pin/matikan toggle-nya</p>
+                    <p>3. Atau buka <span className="font-mono bg-red-800 px-1 rounded">chrome://extensions</span> → cari Sider → matikan</p>
+                    <p>4. Klik <strong>"Refresh Pemeriksaan"</strong> di bawah setelah selesai</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2 max-h-32 overflow-y-auto">
               {extensionResult.detectedExtensions.map((ext, index) => (
                 <div key={index} className="bg-red-800 p-2 rounded text-sm">
