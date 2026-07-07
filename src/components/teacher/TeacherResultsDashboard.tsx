@@ -32,6 +32,7 @@ interface Session {
     major: string;
     className: string;
     fullName?: string;
+    username?: string;
   };
   status: string;
   violations: number;
@@ -853,7 +854,9 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
         <table className="w-full text-left">
           <thead className="bg-gray-700">
             <tr>
+              <th className="p-4">No.</th>
               <th className="p-4">Nama Lengkap</th>
+              <th className="p-4">Username</th>
               <th className="p-4">NIM</th>
               <th className="p-4">Program Studi</th>
               <th className="p-4">Kelas</th>
@@ -872,7 +875,7 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
           <tbody>
             {filteredSessions.length === 0 ? (
               <tr>
-                <td colSpan={14} className="text-center p-8 text-gray-400">
+                <td colSpan={16} className="text-center p-8 text-gray-400">
                   {isPageLoading ? 'Memuat data...' : sessions.length === 0
                     ? "Belum ada peserta ujian yang menyelesaikan ujian."
                     : "Tidak ada peserta ujian yang sesuai dengan filter."
@@ -880,9 +883,11 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
                 </td>
               </tr>
             ) : (
-              filteredSessions.map(session => (
+              filteredSessions.map((session, index) => (
                 <tr key={session.id} className="border-b border-gray-700 hover:bg-gray-700/50">
+                  <td className="p-4 text-gray-400 text-center">{(currentPage - 1) * SESSIONS_PER_PAGE + index + 1}</td>
                   <td className="p-4 font-semibold">{session.studentInfo.name || session.studentInfo.fullName || 'N/A'}</td>
+                  <td className="p-4 text-gray-300">{session.studentInfo.username || '-'}</td>
                   <td className="p-4 text-gray-300">{session.studentInfo.nim}</td>
                   <td className="p-4 text-gray-300">{session.studentInfo.major}</td>
                   <td className="p-4 text-gray-300">{session.studentInfo.className}</td>

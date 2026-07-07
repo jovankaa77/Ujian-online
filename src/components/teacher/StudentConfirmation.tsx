@@ -41,6 +41,9 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [confirmDeleteApp, setConfirmDeleteApp] = useState<Application | null>(null);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [searchName, setSearchName] = useState('');
+  const [searchUsername, setSearchUsername] = useState('');
+  const [searchMajor, setSearchMajor] = useState('');
 
   const totalPages = Math.ceil(totalCount / APPLICATIONS_PER_PAGE);
 
@@ -211,7 +214,18 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
     }
   };
 
-  const pendingApplications = applications.filter(app => app.status === 'pending');
+  const filteredApplications = applications.filter(app => {
+    const name = app.studentData.fullName?.toLowerCase() || '';
+    const uname = app.studentData.username?.toLowerCase() || '';
+    const major = app.studentData.major?.toLowerCase() || '';
+    return (
+      (!searchName || name.includes(searchName.toLowerCase())) &&
+      (!searchUsername || uname.includes(searchUsername.toLowerCase())) &&
+      (!searchMajor || major.includes(searchMajor.toLowerCase()))
+    );
+  });
+
+  const pendingApplications = filteredApplications.filter(app => app.status === 'pending');
   const startItem = totalCount > 0 ? (currentPage - 1) * APPLICATIONS_PER_PAGE + 1 : 0;
   const endItem = Math.min(currentPage * APPLICATIONS_PER_PAGE, totalCount);
 
@@ -336,6 +350,55 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
         </div>
       </div>
 
+      <div className="mb-4 bg-gray-800 p-4 rounded-lg">
+        <h3 className="text-sm font-semibold text-gray-300 mb-3">Cari Peserta</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Nama Lengkap</label>
+            <input
+              type="text"
+              value={searchName}
+              onChange={e => setSearchName(e.target.value)}
+              placeholder="Cari nama..."
+              className="w-full p-2.5 bg-gray-700 rounded-md border border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Username</label>
+            <input
+              type="text"
+              value={searchUsername}
+              onChange={e => setSearchUsername(e.target.value)}
+              placeholder="Cari username..."
+              className="w-full p-2.5 bg-gray-700 rounded-md border border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Program Studi</label>
+            <input
+              type="text"
+              value={searchMajor}
+              onChange={e => setSearchMajor(e.target.value)}
+              placeholder="Cari program studi..."
+              className="w-full p-2.5 bg-gray-700 rounded-md border border-gray-600 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+        </div>
+        {(searchName || searchUsername || searchMajor) && (
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs text-blue-400">
+              Menampilkan {filteredApplications.length} dari {applications.length} data di halaman ini
+            </span>
+            <button
+              onClick={() => { setSearchName(''); setSearchUsername(''); setSearchMajor(''); }}
+              className="text-xs text-gray-400 hover:text-white underline"
+            >
+              Reset pencarian
+            </button>
+          </div>
+        )}
+      </div>
+
       {pendingApplications.length > 0 && (
         <div className="mb-4 bg-gray-800 p-4 rounded-lg">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -397,7 +460,15 @@ const StudentConfirmation: React.FC<StudentConfirmationProps> = ({ navigateBack,
                   </tr>
                 </thead>
                 <tbody>
-                  {applications.map(app => (
+                  {filteredApplications.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="text-center p-8 text-gray-400">
+                        {(searchName || searchUsername || searchMajor)
+                          ? 'Tidak ada peserta yang sesuai dengan pencarian.'
+                          : 'Belum ada peserta ujian yang mengajukan untuk ujian ini.'}
+                      </td>
+                    </tr>
+                  ) : filteredApplications.map(app => (
                     <tr key={app.id} className="border-b border-gray-700 hover:bg-gray-700/50">
                       <td className="p-4">
                         {app.status === 'pending' && (
