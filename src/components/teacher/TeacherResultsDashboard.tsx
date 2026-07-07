@@ -390,32 +390,6 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
       setIsExporting(false);
     }
   };
-
-  const downloadResultsExcel = async () => {
-    setIsExporting(true);
-    try {
-      const allSessions = await fetchAllSessionsForExport();
-      const rows = buildExportRows(allSessions, questions);
-      const headers = ['No', 'Nama Lengkap', 'NIM', 'Program Studi', 'Kelas', 'Status', 'Pelanggaran', 'Nilai PG', 'Nilai Essay', 'Nilai Live Code', 'Pengurangan', 'Nilai Akhir'];
-      const csvRows = [
-        headers.join(','),
-        ...rows.map(r => [r.no, `"${r.name}"`, `"${r.nim}"`, `"${r.major}"`, `"${r.kelas}"`, r.status, r.violations, r.pg, r.essay, r.livecode, r.reduction, r.total].join(','))
-      ];
-      const BOM = '\uFEFF';
-      const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Hasil_Ujian_${exam.code}_${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Export Excel error:', err);
-      alert('Gagal mengekspor Excel. Silakan coba lagi.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
   if (selectedSession) {
     return (
       <EssayGradingView 
@@ -454,16 +428,6 @@ const TeacherResultsDashboard: React.FC<TeacherResultsDashboardProps> = ({ navig
             ) : (
               <><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Refresh Data</>
             )}
-          </button>
-          <button
-            onClick={downloadResultsExcel}
-            disabled={isExporting || totalCount === 0}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {isExporting ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Mengekspor...</> : <>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              Export Excel (Semua)
-            </>}
           </button>
           <button
             onClick={downloadResultsPDF}
