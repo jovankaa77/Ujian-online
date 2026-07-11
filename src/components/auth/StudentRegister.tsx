@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState } from 'react';
 import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
@@ -26,12 +26,6 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     if (validationErrors[e.target.name]) {
@@ -47,52 +41,6 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
       });
     }
   };
-
-  const openCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
-      });
-      streamRef.current = stream;
-      setIsCameraOpen(true);
-    } catch (err) {
-      setError('Gagal mengakses kamera. Pastikan izin kamera diaktifkan.');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isCameraOpen && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-    }
-  }, [isCameraOpen]);
-
-  const closeCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setIsCameraOpen(false);
-  }, []);
-
-  const capturePhoto = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    canvas.width = 400;
-    canvas.height = 300;
-    ctx.drawImage(video, 0, 0, 400, 300);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-    setProfilePhoto(dataUrl);
-    closeCamera();
-  }, [closeCamera]);
-
-  const retakePhoto = useCallback(() => {
-    setProfilePhoto(null);
-    openCamera();
-  }, [openCamera]);
 
   const validateUniqueFields = async () => {
     const studentsRef = collection(db, `artifacts/${appId}/public/data/students`);
@@ -121,12 +69,6 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
     setError('');
     setValidationErrors({});
     setIsLoading(true);
-
-    if (!profilePhoto) {
-      setError('Foto profil wajib diambil. Silakan ambil foto menggunakan kamera.');
-      setIsLoading(false);
-      return;
-    }
 
     if (formData.password !== formData.confirmPassword) {
       setError('Password tidak cocok');
@@ -166,7 +108,7 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
         className: formData.className,
         university: formData.university,
         whatsapp: formData.whatsapp,
-        profilePhoto: profilePhoto,
+        profilePhoto: null,
         createdAt: new Date(),
         role: 'student'
       };
@@ -207,86 +149,11 @@ const StudentRegister: React.FC<StudentRegisterProps> = ({ navigateTo, navigateB
             <li>- Password minimal 6 karakter</li>
             <li>- <strong>Kelas:</strong> Gunakan singkatan seperti A, B, C</li>
             <li>- <strong>Jurusan:</strong> Gunakan singkatan seperti RPL, TKJ, MM, TI, SI</li>
-            <li>- <strong>Foto profil wajib diambil dari kamera</strong></li>
             <li>- Pastikan semua data yang dimasukkan benar dan valid</li>
           </ul>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-300 border-b border-gray-600 pb-2 mb-4">Foto Profil</h3>
-            <div className="flex flex-col items-center">
-              {profilePhoto ? (
-                <div className="w-full">
-                  <div className="bg-green-900 border border-green-600 rounded-lg p-2 mb-3 text-center">
-                    <p className="text-green-300 text-sm font-medium">Foto berhasil diambil</p>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <img
-                      src={profilePhoto}
-                      alt="Preview foto profil"
-                      className="w-full max-w-xs rounded-lg object-cover border-2 border-green-500 mb-2"
-                    />
-                    <img
-                      src={profilePhoto}
-                      alt="Foto profil bulat"
-                      className="w-24 h-24 rounded-full object-cover border-4 border-green-500 -mt-14 ring-4 ring-gray-800"
-                    />
-                    <p className="text-gray-400 text-xs mt-2">Preview tampilan foto profil</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={retakePhoto}
-                    className="mt-3 w-full bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors"
-                  >
-                    Ambil Ulang Foto
-                  </button>
-                </div>
-              ) : isCameraOpen ? (
-                <div className="w-full">
-                  <div className="relative rounded-lg overflow-hidden border-2 border-gray-600">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full rounded-lg"
-                    />
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      type="button"
-                      onClick={capturePhoto}
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors"
-                    >
-                      Ambil Foto
-                    </button>
-                    <button
-                      type="button"
-                      onClick={closeCamera}
-                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors"
-                    >
-                      Batal
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={openCamera}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  Buka Kamera untuk Foto Profil
-                </button>
-              )}
-              <canvas ref={canvasRef} className="hidden" />
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-gray-300 border-b border-gray-600 pb-2">Data Pribadi</h3>

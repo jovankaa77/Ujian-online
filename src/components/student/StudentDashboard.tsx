@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc, getDocs, updateDoc, limit } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
@@ -52,6 +52,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
   const [editError, setEditError] = useState('');
   const [editValidationErrors, setEditValidationErrors] = useState<{[key: string]: string}>({});
   const [isUpdating, setIsUpdating] = useState(false);
+  const [editProfilePhoto, setEditProfilePhoto] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState('');
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Early return if no user
@@ -270,7 +273,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
 
   const handleEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEditFormData({ ...editFormData, [e.target.name]: e.target.value });
-    // Clear validation error when user starts typing
     if (editValidationErrors[e.target.name]) {
       setEditValidationErrors(prev => {
         const newErrors = { ...prev };
@@ -278,6 +280,32 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
         return newErrors;
       });
     }
+  };
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPhotoError('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!allowedTypes.includes(file.type) || !['jpg', 'jpeg', 'png'].includes(ext || '')) {
+      setPhotoError('Format file tidak didukung. Hanya jpg, jpeg, dan png yang diperbolehkan.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError('Ukuran file terlalu besar. Maksimal 5 MB.');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditProfilePhoto(ev.target?.result as string);
+    };
+    reader.readAsDataURL(file);
   };
 
   const validateUniqueNIM = async () => {
@@ -341,9 +369,12 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
         updatedAt: new Date()
       };
 
-      // Only update password if provided
       if (editFormData.password) {
         updateData.password = editFormData.password;
+      }
+
+      if (editProfilePhoto) {
+        updateData.profilePhoto = editProfilePhoto;
       }
 
       // Update in Firestore
@@ -360,6 +391,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
         password: '',
         confirmPassword: ''
       });
+      setEditProfilePhoto(null);
+      setPhotoError('');
       
       setShowEditProfile(false);
       alert('Profil berhasil diperbarui!');
@@ -395,10 +428,20 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
           <div className="bg-gray-800 p-6 rounded-lg shadow-xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <div className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center">
-                  <span className="text-2xl font-bold text-white">
-                    {studentProfile.fullName.charAt(0).toUpperCase()}
-                  </span>
+                <div className="w-16 h-16 rounded-full overflow-hidden flex-shrink-0 border-2 border-indigo-500">
+                  {studentProfile.profilePhoto ? (
+                    <img
+                      src={studentProfile.profilePhoto}
+                      alt="Foto profil"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-indigo-600 flex items-center justify-center">
+                      <span className="text-2xl font-bold text-white">
+                        {studentProfile.fullName.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">{studentProfile.fullName}</h3>
@@ -429,6 +472,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
                   setShowEditProfile(false);
                   setEditError('');
                   setEditValidationErrors({});
+                  setEditProfilePhoto(null);
+                  setPhotoError('');
                 }}
                 className="text-gray-400 hover:text-white text-2xl"
               >
@@ -448,6 +493,48 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
             </div>
 
             <form onSubmit={handleUpdateProfile} className="space-y-4">
+              {/* Photo Upload Section */}
+              <div className="mb-2">
+                <h4 className="text-lg font-semibold text-gray-300 border-b border-gray-600 pb-2 mb-4">Foto Profil</h4>
+                <div className="flex items-center gap-5">
+                  <div className="w-20 h-20 rounded-full overflow-hidden flex-shrink-0 border-2 border-gray-500">
+                    {editProfilePhoto ? (
+                      <img src={editProfilePhoto} alt="Preview" className="w-full h-full object-cover" />
+                    ) : studentProfile?.profilePhoto ? (
+                      <img src={studentProfile.profilePhoto} alt="Foto profil" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-indigo-600 flex items-center justify-center">
+                        <span className="text-2xl font-bold text-white">
+                          {studentProfile?.fullName?.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept=".jpg,.jpeg,.png"
+                      onChange={handlePhotoChange}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => photoInputRef.current?.click()}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors"
+                    >
+                      Pilih Foto
+                    </button>
+                    <p className="text-xs text-gray-400 mt-2">Format: jpg, jpeg, png. Maks. 5 MB.</p>
+                    {editProfilePhoto && (
+                      <p className="text-xs text-green-400 mt-1">Foto baru dipilih. Akan disimpan saat klik "Simpan Perubahan".</p>
+                    )}
+                    {photoError && (
+                      <p className="text-xs text-red-400 mt-1">{photoError}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Left Column - Personal Data */}
                 <div className="space-y-4">
@@ -616,12 +703,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, navigateTo, n
               )}
 
               <div className="flex justify-end space-x-4 pt-6">
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     setShowEditProfile(false);
                     setEditError('');
                     setEditValidationErrors({});
+                    setEditProfilePhoto(null);
+                    setPhotoError('');
                   }}
                   className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-6 rounded-lg"
                 >
