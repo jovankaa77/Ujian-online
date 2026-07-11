@@ -14,7 +14,6 @@ import {
   captureFrameFromVideo,
   areModelsLoaded,
 } from '../../utils/faceVerification';
-import { startAIExamMonitoring } from '../../utils/extensionDetection';
 
 
 interface Question {
@@ -129,7 +128,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   const examOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const faceBoxLoopRef = useRef<NodeJS.Timeout | null>(null);
   const [faceWarningMessage, setFaceWarningMessage] = useState<string | null>(null);
-  const aiMonitorCleanupRef = useRef<(() => void) | null>(null);
 
   const drawExamFaceBoxes = (
     boxes: FaceBox[],
@@ -1092,32 +1090,6 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     // Fullscreen is now handled by StudentPreCheck on user interaction
     // This useEffect is removed to prevent permission errors
   }, [isLoading, questions.length, isFullscreenSupported, isFinished]);
-
-  // Monitor AI extensions — langsung diskualifikasi tanpa peringatan
-  useEffect(() => {
-    if (isLoading || isFinished) return;
-
-    const cleanup = startAIExamMonitoring((extensionName) => {
-      if (isFinishedRef.current) return;
-
-      updateDoc(sessionDocRef, {
-        violations: 99,
-        lastViolation: {
-          reason: `Diskualifikasi: Terdeteksi ${extensionName}`,
-          timestamp: new Date().toISOString()
-        }
-      }).catch(() => {});
-
-      finishExam(`Diskualifikasi: Terdeteksi ${extensionName}`);
-    });
-
-    aiMonitorCleanupRef.current = cleanup;
-
-    return () => {
-      cleanup();
-      aiMonitorCleanupRef.current = null;
-    };
-  }, [isLoading, isFinished]);
 
   useEffect(() => {
     if (isFinished || isLoading) return;
