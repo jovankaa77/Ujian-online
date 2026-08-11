@@ -44,7 +44,7 @@ const HomePage: React.FC<HomePageProps> = ({ navigateTo, navigateBack, canGoBack
                 <li className="leading-relaxed">
                   <span className="font-semibold text-white">Koneksi Internet Wajib Stabil</span>
                   <p className="mt-1 ml-5 text-gray-400">
-                    Soal ujian tipe Live Coding (HTML CSS Dan javascript, dan Javascript) membutuhkan koneksi langsung ke server compiler eksternal. Jika internet Anda tidak stabil, eksekusi kode akan gagal atau mengalami status <em>Timeout</em>.
+                    Soal ujian tipe Live Coding (HTML &amp; CSS, Python, PHP, C++, C#) membutuhkan koneksi langsung ke server compiler eksternal. Jika internet Anda tidak stabil, eksekusi kode akan gagal atau mengalami status <em>Timeout</em>.
                   </p>
                 </li>
                 <li className="leading-relaxed">
