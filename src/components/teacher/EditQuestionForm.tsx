@@ -1,13 +1,10 @@
 import React, { useState, useRef } from 'react';
 
-const SUPPORTED_LANGUAGES = ['javascript', 'python', 'php', 'cpp', 'htmlcss'] as const;
+const SUPPORTED_LANGUAGES = ['javascript', 'htmlcss'] as const;
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   javascript: 'JavaScript',
-  python: 'Pemograman Python',
-  php: 'Pemograman PHP',
-  cpp: 'C++',
   htmlcss: 'HTML, CSS Dan Javascript'
 };
 
