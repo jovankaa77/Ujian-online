@@ -208,40 +208,32 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
     violationType: 'Wajah Ganda' | 'Berbeda Identitas',
     evidencePhoto: string
   ) => {
-    const maxRetries = 3;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`[FaceViolation] Saving violation (attempt ${attempt}/${maxRetries})...`, {
-          violationType,
-          studentId: user.id,
-          examId: exam.id,
-          examCode: exam.code,
-          photoLength: evidencePhoto?.length
-        });
+    try {
+      console.log('[FaceViolation] Saving violation to database...', {
+        violationType,
+        studentId: user.id,
+        examId: exam.id,
+        examCode: exam.code,
+        photoLength: evidencePhoto?.length
+      });
 
-        const logsRef = collection(db, `artifacts/${appId}/public/data/face_verification_logs`);
-        const docRef = await addDoc(logsRef, {
-          studentId: user.id,
-          fullName: studentInfo?.name || studentInfo?.fullName || '',
-          kelas: studentInfo?.className || '',
-          jurusan: studentInfo?.major || '',
-          violationType,
-          evidencePhotoUrl: evidencePhoto,
-          baselinePhotoUrl: faceBaselineUrl || '',
-          timestamp: new Date(),
-          examId: exam.id,
-          examCode: exam.code || '',
-        });
-        console.log(`[FaceViolation] Successfully saved! Doc ID: ${docRef.id}`);
-        return;
-      } catch (error) {
-        console.error(`[FaceViolation] Attempt ${attempt} failed:`, error);
-        if (attempt < maxRetries) {
-          await new Promise(r => setTimeout(r, 1000 * attempt));
-        }
-      }
+      const logsRef = collection(db, `artifacts/${appId}/public/data/face_verification_logs`);
+      const docRef = await addDoc(logsRef, {
+        studentId: user.id,
+        fullName: studentInfo?.name || studentInfo?.fullName || '',
+        kelas: studentInfo?.className || '',
+        jurusan: studentInfo?.major || '',
+        violationType,
+        evidencePhotoUrl: evidencePhoto,
+        baselinePhotoUrl: faceBaselineUrl || '',
+        timestamp: new Date(),
+        examId: exam.id,
+        examCode: exam.code || '',
+      });
+      console.log(`[FaceViolation] Successfully saved! Doc ID: ${docRef.id}`);
+    } catch (error) {
+      console.error('[FaceViolation] Failed to save:', error);
     }
-    console.error('[FaceViolation] All retries exhausted. Violation could not be saved.');
   };
 
   const checkFaceVerification = async () => {
