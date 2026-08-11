@@ -170,7 +170,7 @@ export interface FaceVerificationLog {
   fullName: string;
   kelas: string;
   jurusan: string;
-  violationType: 'Wajah Ganda' | 'Wajah Tidak Dikenali';
+  violationType: 'Wajah Ganda' | 'Berbeda Identitas';
   evidencePhotoUrl: string;
   baselinePhotoUrl: string;
   timestamp: Date;

@@ -205,7 +205,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
   }, [isCameraReady, faceModelLoaded, isFinished]);
 
   const saveFaceViolationLog = async (
-    violationType: 'Wajah Ganda' | 'Wajah Tidak Dikenali',
+    violationType: 'Wajah Ganda' | 'Berbeda Identitas',
     evidencePhoto: string
   ) => {
     try {
@@ -294,7 +294,7 @@ const StudentExam: React.FC<StudentExamProps> = ({ appState, navigateTo, user })
             if (evidencePhoto) {
               faceViolationCountRef.current += 1;
               setFaceViolationCount(faceViolationCountRef.current);
-              await saveFaceViolationLog('Wajah Tidak Dikenali', evidencePhoto);
+              await saveFaceViolationLog('Berbeda Identitas', evidencePhoto);
             }
           }
         } else {

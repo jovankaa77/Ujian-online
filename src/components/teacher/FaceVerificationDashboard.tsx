@@ -14,7 +14,7 @@ interface FaceLog {
   fullName: string;
   kelas: string;
   jurusan: string;
-  violationType: 'Wajah Ganda' | 'Wajah Tidak Dikenali';
+  violationType: 'Wajah Ganda' | 'Berbeda Identitas';
   evidencePhotoUrl: string;
   baselinePhotoUrl: string;
   timestamp: any;
@@ -465,7 +465,7 @@ const StudentViolationCard: React.FC<{
   onPhotoClick: (photo: SelectedPhoto) => void;
 }> = ({ student, formatTimestamp, onPhotoClick }) => {
   const doubleCount = student.violations.filter((v) => v.violationType === 'Wajah Ganda').length;
-  const unrecognizedCount = student.violations.filter((v) => v.violationType === 'Wajah Tidak Dikenali').length;
+  const unrecognizedCount = student.violations.filter((v) => v.violationType === 'Berbeda Identitas').length;
 
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
@@ -517,7 +517,7 @@ const StudentViolationCard: React.FC<{
           {unrecognizedCount > 0 && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-yellow-900/60 text-yellow-300 border border-yellow-700/50">
               <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
-              Tidak Dikenali ({unrecognizedCount})
+              Berbeda Identitas ({unrecognizedCount})
             </span>
           )}
         </div>
@@ -583,7 +583,7 @@ const StudentViolationCard: React.FC<{
                         : 'bg-yellow-900/60 text-yellow-300'
                     }`}
                   >
-                    {v.violationType === 'Wajah Ganda' ? 'Ganda' : 'Tidak Dikenali'}
+                    {v.violationType === 'Wajah Ganda' ? 'Ganda' : 'Berbeda Identitas'}
                   </span>
                   <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">
                     {formatTimestamp(v.timestamp)}
