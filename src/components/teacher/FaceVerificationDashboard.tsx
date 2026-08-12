@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, getDocs, query, where, orderBy, doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 interface FaceVerificationDashboardProps {
@@ -64,36 +64,8 @@ const FaceVerificationDashboard: React.FC<FaceVerificationDashboardProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (!exam?.id) return;
-    setIsLoading(true);
-
-    const logsRef = collection(db, `artifacts/${appId}/public/data/face_verification_logs`);
-    const q = query(logsRef, where('examId', '==', exam.id));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const logsData: FaceLog[] = [];
-        snapshot.forEach((doc) => {
-          logsData.push({ id: doc.id, ...doc.data() } as FaceLog);
-        });
-        logsData.sort((a, b) => {
-          const timeA = a.timestamp?.toDate?.() || new Date(a.timestamp);
-          const timeB = b.timestamp?.toDate?.() || new Date(b.timestamp);
-          return timeB.getTime() - timeA.getTime();
-        });
-        setLogs(logsData);
-        setIsLoading(false);
-      },
-      (err) => {
-        console.error('Real-time listener failed, falling back to one-time fetch:', err);
-        loadLogs();
-      }
-    );
-
+    loadLogs();
     loadBaselinePhotos();
-
-    return () => unsubscribe();
   }, [exam?.id]);
 
   const loadLogs = async () => {
